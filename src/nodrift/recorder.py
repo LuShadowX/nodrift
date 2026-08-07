@@ -269,3 +269,51 @@ def _cheap_hash(blob: bytes) -> str:
     import hashlib
 
     return hashlib.blake2b(blob, digest_size=16).hexdigest()
+
+
+def merge_recordings(shards: list[str], out: str, cap: int | None = None) -> dict:
+    """Combine per-worker recordings into one, dropping duplicates.
+
+    Under pytest-xdist each worker records in its own process, so a run's
+    inputs are spread across several files. Dedup uses the same
+    (target, bytes) identity the recorder uses within a process, so a value
+    two workers both saw is stored once.
+
+    `cap` is re-applied here because each worker enforced it independently:
+    without this, `-n 4` would quietly record four times what the user asked
+    for.
+    """
+    seen: set[tuple[str, bytes]] = set()
+    per_target: dict[str, int] = defaultdict(int)
+    merged: list[dict] = []
+    dropped = 0
+
+    for shard in shards:
+        try:
+            with open(shard, "rb") as fh:
+                records = pickle.load(fh)
+        except Exception:
+            continue
+        if isinstance(records, dict):  # tolerate richer payloads
+            records = records.get("records", [])
+        for record in records:
+            target = record["target"]
+            key = (target, record["args"])
+            if key in seen:
+                continue
+            if cap is not None and per_target[target] >= cap:
+                dropped += 1
+                continue
+            seen.add(key)
+            per_target[target] += 1
+            merged.append(record)
+
+    with open(out, "wb") as fh:
+        pickle.dump(merged, fh, protocol=pickle.HIGHEST_PROTOCOL)
+
+    return {
+        "shards": len(shards),
+        "records": len(merged),
+        "targets": len({r["target"] for r in merged}),
+        "dropped_over_cap": dropped,
+    }

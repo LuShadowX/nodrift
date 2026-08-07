@@ -11,9 +11,20 @@ import os
 import pkgutil
 import sys
 
-from .recorder import Recorder
+import glob
+
+from .recorder import Recorder, merge_recordings
 
 _recorder = None
+
+
+def _worker_id() -> str:
+    """xdist worker name ('gw0'), or '' in the controller / a serial run."""
+    return os.environ.get("PYTEST_XDIST_WORKER", "")
+
+
+def _under_xdist(config) -> bool:
+    return bool(getattr(config.option, "numprocesses", None))
 
 
 def pytest_addoption(parser):
@@ -58,6 +69,12 @@ def pytest_configure(config):
     if not packages:
         return
 
+    # Under xdist the controller runs no tests, so it records nothing. If it
+    # installed anyway it would write an empty file over the workers' output
+    # and `check` would report a confident all-clear based on no data.
+    if _under_xdist(config) and not _worker_id():
+        return
+
     for name in packages:
         try:
             module = importlib.import_module(name)
@@ -91,13 +108,37 @@ def _import_submodules(package) -> None:
 
 def pytest_unconfigure(config):
     global _recorder
-    if _recorder is None:
-        return
 
-    _recorder.uninstall()
     out = _setting(config, "--nodrift-out", "NODRIFT_OUT", None) or os.path.join(
         ".nodrift", "recording.pkl"
     )
+
+    if _recorder is None:
+        # Controller under xdist: the workers have finished and written their
+        # shards, so this is where they get stitched together.
+        if _under_xdist(config) and not _worker_id():
+            shards = sorted(glob.glob(out + ".gw*"))
+            if shards:
+                merged = merge_recordings(
+                    shards, out,
+                    cap=int(_setting(config, "--nodrift-cap", "NODRIFT_CAP", 600)),
+                )
+                for shard in shards:
+                    try:
+                        os.remove(shard)
+                    except OSError:
+                        pass
+                print(
+                    f"[nodrift] merged {merged['shards']} worker recordings: "
+                    f"{merged['records']} distinct inputs across "
+                    f"{merged['targets']} functions -> {out}",
+                    file=sys.stderr,
+                )
+        return
+
+    _recorder.uninstall()
+    if _worker_id():
+        out = f"{out}.{_worker_id()}"
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     summary = _recorder.dump(out)
 
