@@ -127,14 +127,24 @@ is not a bug-hunting tool. It is a safety net.
 
 ## Contributing
 
-Issues and pull requests are welcome. The most useful contributions right now:
+Contributions are very welcome, and the work is deliberately easy to pick up —
+most of it touches one file and needs one test.
+
+Start with the [good first issues][gfi]. The broad areas that need help:
 
 - **Side-effect capture** — intercept `requests`, `sqlalchemy`, `open()`
 - **Comparators** for types that need tolerance, e.g. numpy arrays
+- **Performance** — recording currently costs 15-20x
 - **Windows support** — replace the `SIGALRM` timeout
 - **Framework adapters** beyond pytest
 
-Each is self-contained; you do not need to understand the whole engine.
+The most valuable bug report of all is a **false positive**: if `nodrift check`
+reports a change on code you did not change, please open an issue.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and how the pieces fit
+together.
+
+[gfi]: https://github.com/LuShadowX/nodrift/labels/good%20first%20issue
 
 ```bash
 git clone https://github.com/LuShadowX/nodrift

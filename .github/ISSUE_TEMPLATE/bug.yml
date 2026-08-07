@@ -1,0 +1,21 @@
+name: Bug report
+description: Something crashed or behaved unexpectedly
+labels: ["bug"]
+body:
+  - type: textarea
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Steps to reproduce
+      render: shell
+  - type: input
+    attributes:
+      label: Python version and OS

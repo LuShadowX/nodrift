@@ -1,0 +1,31 @@
+name: False positive
+description: nodrift reported a change on code you did not change
+labels: ["bug", "false-positive"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        These are the most important bugs in this project. A tool that cries
+        wolf once does not get run twice.
+  - type: input
+    attributes:
+      label: Function reported
+      placeholder: mypkg.module:function
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: What nodrift printed
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Why you believe the behaviour did not change
+      description: e.g. the function is pure, or the difference is a timestamp
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Python version and OS
+      placeholder: "3.12, Ubuntu 24.04"
