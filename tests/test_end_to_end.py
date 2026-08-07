@@ -216,3 +216,139 @@ def test_cli_reports_clean_run(recorded, tmp_path):
     with open(out) as fh:
         results = json.load(fh)
     assert results, "replay produced no results"
+
+
+# --------------------------------------------------------------------------
+# functions the recorder had to give up on
+# --------------------------------------------------------------------------
+
+# `digest` is called with arguments past max_blob_bytes often enough to trip
+# abandon_after, so the recorder stops attempting it. `classify` stays cheap
+# and records normally, which is what makes the gap partial rather than total.
+BIG = '''
+def classify(n):
+    return "positive" if n > 0 else "other"
+
+
+def digest(payload):
+    return len(payload)
+'''
+
+BIG_TESTS = '''
+import big
+
+
+def test_classify():
+    assert big.classify(1) == "positive"
+
+
+def test_digest():
+    for i in range(6):
+        assert big.digest("x" * 80_000 + str(i)) == 80_000 + len(str(i))
+'''
+
+
+def _big_repo(tmp_path):
+    repo = tmp_path / "bigrepo"
+    repo.mkdir()
+    _write(str(repo), "big.py", BIG)
+    _write(str(repo), "test_big.py", BIG_TESTS)
+    for argv in (["init", "-q", "."], ["add", "-A"],
+                 ["-c", "user.email=t@t", "-c", "user.name=t",
+                  "commit", "-qm", "initial"]):
+        subprocess.run(["git", *argv], cwd=str(repo), check=True,
+                       capture_output=True)
+    return repo
+
+
+def test_abandoned_functions_survive_into_the_recording(tmp_path):
+    """The gap has to travel with the recording — `check` is a later process."""
+    from nodrift.cli import _load_abandoned
+
+    repo = _big_repo(tmp_path)
+    recorded = _nodrift(repo, "record", "--package", "big")
+    recording = repo / ".nodrift" / "recording.pkl"
+    assert recording.exists(), recorded.stdout + recorded.stderr
+
+    assert "big:digest" in _load_abandoned(str(recording))
+
+
+def test_check_names_the_functions_it_does_not_cover(tmp_path):
+    """A clean verdict that hides an uncovered function reads as a lie."""
+    repo = _big_repo(tmp_path)
+    _nodrift(repo, "record", "--package", "big")
+
+    quiet = _nodrift(repo, "check", "HEAD")
+    assert quiet.returncode == 0, quiet.stdout + quiet.stderr
+    assert "not covered by this check" in quiet.stdout
+    assert "big:digest" not in quiet.stdout, "names belong behind --verbose"
+
+    loud = _nodrift(repo, "check", "HEAD", "--verbose")
+    assert "big:digest" in loud.stdout, loud.stdout
+
+    as_json = _nodrift(repo, "check", "HEAD", "--json")
+    assert "big:digest" in json.loads(as_json.stdout)["not_covered"]
+
+
+def test_check_surfaces_a_bad_ref_instead_of_a_name_error(tmp_path):
+    """Regression: reporting inside the `finally` masked the real failure.
+
+    With `_print_report` in the teardown path, a replay that raised left
+    `report` unbound, so the user saw a NameError instead of the git error.
+    """
+    repo = _big_repo(tmp_path)
+    _nodrift(repo, "record", "--package", "big")
+
+    result = _nodrift(repo, "check", "no-such-ref")
+    assert result.returncode != 0
+    combined = result.stdout + result.stderr
+    assert "NameError" not in combined, combined
+
+
+def test_legacy_recordings_without_the_payload_wrapper_still_replay(
+    recorded, tmp_path
+):
+    """Recordings made before the wrapper are a bare list, not a dict."""
+    import pickle
+
+    from nodrift.cli import _load_abandoned
+
+    project, recording, _ = recorded
+    with open(recording, "rb") as fh:
+        payload = pickle.load(fh)
+
+    legacy = str(tmp_path / "legacy.pkl")
+    with open(legacy, "wb") as fh:
+        pickle.dump(payload["records"], fh)
+
+    assert _load_abandoned(legacy) == []
+    out = str(tmp_path / "legacy.json")
+    _replay(str(project), legacy, out)
+    with open(out) as fh:
+        assert json.load(fh), "legacy recording replayed to nothing"
+
+
+def test_merge_keeps_every_workers_abandoned_targets(tmp_path):
+    """Under xdist the merge is the only place the union can be formed."""
+    import pickle
+
+    from nodrift.recorder import merge_recordings
+
+    shards = []
+    for index, names in enumerate((["a:one"], ["a:two", "a:one"])):
+        shard = str(tmp_path / f"shard.gw{index}")
+        with open(shard, "wb") as fh:
+            pickle.dump(
+                {"version": 1,
+                 "records": [{"target": "a:kept", "args": b"%d" % index}],
+                 "abandoned": names},
+                fh,
+            )
+        shards.append(shard)
+
+    out = str(tmp_path / "merged.pkl")
+    summary = merge_recordings(shards, out)
+
+    assert summary["abandoned"] == ["a:one", "a:two"]
+    with open(out, "rb") as fh:
+        assert pickle.load(fh)["abandoned"] == ["a:one", "a:two"]

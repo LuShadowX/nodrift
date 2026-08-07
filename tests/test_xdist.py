@@ -94,7 +94,7 @@ def test_parallel_recording_is_not_empty(tmp_path):
     assert os.path.exists(out), proc.stderr
 
     with open(out, "rb") as fh:
-        records = pickle.load(fh)
+        records = pickle.load(fh)["records"]
     assert records, "controller clobbered the workers' recording"
     assert {r["target"] for r in records} >= {"calc:band", "calc:size"}
 

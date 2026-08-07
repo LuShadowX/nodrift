@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import pickle
 import shutil
 import subprocess
 import sys
@@ -108,6 +109,19 @@ def _replay(recording: str, source_root: str, out: str, sub: str) -> None:
     )
 
 
+def _load_abandoned(recording: str) -> list[str]:
+    """Functions the recorder gave up on, as carried by the recording.
+
+    Recordings written before the payload wrapper are a bare list and have
+    nothing to report; that is a missing field, not a corrupt file.
+    """
+    with open(recording, "rb") as fh:
+        payload = pickle.load(fh)
+    if isinstance(payload, dict):
+        return list(payload.get("abandoned") or [])
+    return []
+
+
 def cmd_check(args: argparse.Namespace) -> int:
     from .compare import compare
 
@@ -116,6 +130,8 @@ def cmd_check(args: argparse.Namespace) -> int:
         print(f"nodrift: no recording at {recording} — run 'nodrift record' first",
               file=sys.stderr)
         return 1
+
+    abandoned = _load_abandoned(recording)
 
     workdir = tempfile.mkdtemp(prefix="nodrift-")
     stage = os.path.join(workdir, "src")
@@ -142,12 +158,35 @@ def cmd_check(args: argparse.Namespace) -> int:
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 
-    return _print_report(report, args)
+    # Deliberately outside the `finally`: if the replay above raised, `report`
+    # is unbound and reporting here would mask the real error with a NameError.
+    return _print_report(report, args, abandoned)
 
 
-def _print_report(report: dict, args: argparse.Namespace) -> int:
+def _print_not_covered(abandoned: list[str], verbose: bool) -> None:
+    """Say which functions the verdict above does not speak for.
+
+    Without this, `check` reports "no behaviour change" while silently
+    omitting every function whose inputs were too large to record — on
+    `sqlparse` that was 40 of the most important ones.
+    """
+    if not abandoned:
+        return
+    print(f"  {len(abandoned)} function(s) not fully recorded "
+          f"(inputs too large to capture) — not covered by this check")
+    if verbose:
+        for name in abandoned:
+            print(f"      {name}")
+    else:
+        print("      re-run with --verbose to list them")
+
+
+def _print_report(report: dict, args: argparse.Namespace,
+                  abandoned: list[str] | None = None) -> int:
+    abandoned = abandoned or []
+
     if args.json:
-        print(json.dumps(report, indent=2))
+        print(json.dumps({**report, "not_covered": abandoned}, indent=2))
         return 1 if report["total_differs"] else 0
 
     total = report["total_records"]
@@ -157,6 +196,8 @@ def _print_report(report: dict, args: argparse.Namespace) -> int:
     if quarantined:
         print(f"  {quarantined} record(s) quarantined as nondeterministic "
               f"(not compared)")
+
+    _print_not_covered(abandoned, getattr(args, "verbose", False))
 
     if not differs:
         print(f"\n  no behaviour change across {total} recorded inputs "
@@ -204,6 +245,8 @@ def main(argv: list[str] | None = None) -> int:
     chk.add_argument("--subdir", default="",
                      help="path within the repo holding the package (e.g. src)")
     chk.add_argument("--json", action="store_true", help="emit the full report")
+    chk.add_argument("--verbose", "-v", action="store_true",
+                     help="name the functions that could not be recorded")
     chk.set_defaults(func=cmd_check)
 
     args = parser.parse_args(argv)
