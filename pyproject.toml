@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "nodrift"
-version = "0.1.0"
+version = "0.1.1"
 description = "Prove a refactor changed nothing — by replaying your tests' real inputs against both versions."
 readme = "README.md"
 requires-python = ">=3.9"

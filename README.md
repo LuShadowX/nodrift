@@ -1,5 +1,10 @@
 # nodrift
 
+[![PyPI](https://img.shields.io/pypi/v/nodrift)](https://pypi.org/project/nodrift/)
+[![Python](https://img.shields.io/pypi/pyversions/nodrift)](https://pypi.org/project/nodrift/)
+[![CI](https://github.com/LuShadowX/nodrift/actions/workflows/ci.yml/badge.svg)](https://github.com/LuShadowX/nodrift/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 **Prove a refactor changed nothing — by running it, not by reading it.**
 
 You changed 200 lines. Your tests pass. Did anything *actually* change?
