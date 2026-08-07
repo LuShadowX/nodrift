@@ -218,15 +218,21 @@ class Recorder:
         for target, bucket in self.calls.items():
             for blob in bucket.values():
                 records.append({"target": target, "args": blob})
+        abandoned = sorted(self._abandoned)
+        # Persist abandoned targets with the recording so `nodrift check`
+        # can report the coverage gap, not only the pass/fail summary.
+        payload = {
+            "version": 1,
+            "records": records,
+            "abandoned": abandoned,
+        }
         with open(path, "wb") as fh:
-            pickle.dump(records, fh, protocol=pickle.HIGHEST_PROTOCOL)
+            pickle.dump(payload, fh, protocol=pickle.HIGHEST_PROTOCOL)
         summary = {
             "targets": len(self.calls),
             "records": len(records),
             **dict(self.stats),
-            # Named explicitly: these functions are simply not covered, and a
-            # silent gap would read as "verified" when it is not.
-            "abandoned": sorted(self._abandoned),
+            "abandoned": abandoned,
         }
         return summary
 

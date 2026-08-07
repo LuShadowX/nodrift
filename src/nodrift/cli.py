@@ -108,6 +108,21 @@ def _replay(recording: str, source_root: str, out: str, sub: str) -> None:
     )
 
 
+def _load_abandoned(recording: str) -> list[str]:
+    """Return abandoned function names persisted with the recording, if any."""
+    import pickle
+
+    try:
+        with open(recording, "rb") as fh:
+            raw = pickle.load(fh)
+    except Exception:
+        return []
+    if isinstance(raw, dict):
+        abandoned = raw.get("abandoned") or []
+        return list(abandoned)
+    return []
+
+
 def cmd_check(args: argparse.Namespace) -> int:
     from .compare import compare
 
@@ -116,6 +131,8 @@ def cmd_check(args: argparse.Namespace) -> int:
         print(f"nodrift: no recording at {recording} — run 'nodrift record' first",
               file=sys.stderr)
         return 1
+
+    abandoned = _load_abandoned(recording)
 
     workdir = tempfile.mkdtemp(prefix="nodrift-")
     stage = os.path.join(workdir, "src")
@@ -142,7 +159,18 @@ def cmd_check(args: argparse.Namespace) -> int:
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 
-    return _print_report(report, args)
+        code = _print_report(report, args)
+    if abandoned and not args.json:
+        print(
+            f"  note: {len(abandoned)} function(s) were not recorded "
+            f"(arguments too large to pickle) — not covered by this check:"
+        )
+        for name in abandoned[:20]:
+            print(f"    - {name}")
+        if len(abandoned) > 20:
+            print(f"    ... and {len(abandoned) - 20} more")
+        print()
+    return code
 
 
 def _print_report(report: dict, args: argparse.Namespace) -> int:

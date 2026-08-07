@@ -85,7 +85,11 @@ def run(recording_path: str, deterministic: bool) -> dict:
         _install_determinism_controls()
 
     with open(recording_path, "rb") as fh:
-        records = pickle.load(fh)
+        raw = pickle.load(fh)
+    if isinstance(raw, dict) and "records" in raw:
+        records = raw["records"]
+    else:
+        records = raw
 
     signal.signal(signal.SIGALRM, _alarm)
     results: dict[str, list] = {}
