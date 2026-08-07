@@ -11,6 +11,7 @@ import os
 import subprocess
 import sys
 import textwrap
+import time
 
 import pytest
 
@@ -371,3 +372,100 @@ def test_merge_reads_uncompressed_shards_from_an_older_nodrift(tmp_path):
     merge_recordings([shard], out)
 
     assert load_recording(out)["records"] == [{"target": "a:kept", "args": b"1"}]
+
+
+# --------------------------------------------------------------------------
+# the per-call timeout, on platforms with and without SIGALRM
+# --------------------------------------------------------------------------
+
+def _spin(seconds):
+    """Burn time in pure Python, where an async exception can reach us."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        pass
+
+
+@pytest.mark.parametrize("mechanism", ["sigalrm", "watchdog"])
+def test_the_deadline_aborts_a_hung_call(monkeypatch, mechanism):
+    """A mutation that loops forever must not hang the whole run.
+
+    The watchdog case is forced on every platform, so the Windows path is
+    exercised by CI on Linux and macOS rather than only where it ships.
+    """
+    import signal as signal_module
+
+    from nodrift import replay
+
+    if mechanism == "sigalrm":
+        if not replay.HAVE_SIGALRM:
+            pytest.skip("platform has no SIGALRM")
+        signal_module.signal(signal_module.SIGALRM, replay._alarm)
+    monkeypatch.setattr(replay, "HAVE_SIGALRM", mechanism == "sigalrm")
+
+    started = time.monotonic()
+    with pytest.raises(replay._Timeout):
+        with replay._deadline(1):
+            _spin(30)
+    assert time.monotonic() - started < 10, "deadline did not fire promptly"
+
+
+def test_the_watchdog_leaves_a_call_inside_its_deadline_alone(monkeypatch):
+    from nodrift import replay
+
+    monkeypatch.setattr(replay, "HAVE_SIGALRM", False)
+    with replay._deadline(30):
+        value = sum(range(1000))
+    assert value == 499500
+
+
+def test_the_watchdog_recovers_after_firing(monkeypatch):
+    """A record that times out must not affect the record that follows it.
+
+    The watchdog leaves an async exception pending in the calling thread; if
+    it is not cleared on the way out it lands on whatever runs next, and the
+    tool reports a timeout against innocent code.
+    """
+    from nodrift import replay
+
+    monkeypatch.setattr(replay, "HAVE_SIGALRM", False)
+
+    with pytest.raises(replay._Timeout):
+        with replay._deadline(1):
+            _spin(30)
+
+    # The next call must be untouched, both outside a deadline and inside one.
+    assert sum(range(100_000)) == 4_999_950_000
+    with replay._deadline(30):
+        assert sum(range(1000)) == 499500
+
+
+def test_both_timeout_mechanisms_replay_a_recording_identically(
+    recorded, tmp_path, monkeypatch
+):
+    """The fallback has to agree with SIGALRM, not merely avoid crashing.
+
+    Replaying the same recording under each mechanism must produce the same
+    fingerprints — a portability fix that changed results would be worse than
+    no portability at all.
+    """
+    from nodrift import replay
+
+    project, recording, _ = recorded
+    monkeypatch.syspath_prepend(str(project))
+
+    if not replay.HAVE_SIGALRM:
+        pytest.skip("platform has no SIGALRM to compare against")
+
+    monkeypatch.setattr(replay, "HAVE_SIGALRM", True)
+    first = replay.run(recording, deterministic=True)
+    second = replay.run(recording, deterministic=True)
+
+    monkeypatch.setattr(replay, "HAVE_SIGALRM", False)
+    with_watchdog = replay.run(recording, deterministic=True)
+
+    # The toy package puts id(self) in a __repr__, so two runs of the *same*
+    # mechanism already disagree there. Quarantine those the way compare()
+    # does, and hold the rest to exact equality.
+    stable = {key for key, value in first.items() if second.get(key) == value}
+    assert stable, "replay produced nothing deterministic to compare"
+    assert {k: with_watchdog[k] for k in stable} == {k: first[k] for k in stable}
