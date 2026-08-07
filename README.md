@@ -80,9 +80,10 @@ Two details that matter more than they sound:
 
 Being direct, because a tool like this is only worth having if you trust it.
 
-**It is not better than your tests at finding bugs.** Measured on `packaging`:
-its test suite caught 57 of 61 injected mutations, `nodrift` caught 50. Use it
-to check that a change is *inert*, not to hunt for bugs.
+**It is not better than your tests at finding bugs.** Measured across 118
+injected mutations in two libraries, `nodrift` found exactly one defect their
+test suites missed. Use it to check that a change is *inert*, not to hunt for
+bugs.
 
 **It only sees what your tests already run.** No coverage there, no signal
 here.
@@ -107,16 +108,22 @@ with an ordinary one.
 
 | | `packaging` | `sqlparse` |
 |---|---|---|
+| Test suite | 62,424 tests | 494 tests |
 | Recorded inputs | 184,592 | 15,830 |
 | Functions covered | 408 | 141 |
 | **False positives on identical code** | **0** | **0** |
+| Injected mutations caught by `nodrift` | 50 / 61 | 52 / 57 |
+| Injected mutations caught by the test suite | 57 / 61 | 52 / 57 |
 
 Zero false alarms is the property the tool lives or dies by, and it holds on
 both.
 
-On 61 injected mutations in `packaging`, `nodrift` found one real bug that all
-**62,424** of its tests miss: an error message reporting `has invalid data` for
-a field that was merely unrecognised.
+On `sqlparse` the two are exactly tied, and `nodrift` missed nothing the tests
+caught — it matched a real suite's sensitivity without anyone writing the
+assertions. On `packaging`, whose suite is far stronger than most, it trailed;
+it did find one bug all 62,424 tests miss (an error reporting `has invalid
+data` for a field that was merely unrecognised), but one find in 118 mutations
+is not a bug-hunting tool. It is a safety net.
 
 ## Contributing
 
