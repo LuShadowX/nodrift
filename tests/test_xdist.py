@@ -15,7 +15,7 @@ import textwrap
 
 import pytest
 
-from nodrift.recorder import merge_recordings
+from nodrift.recorder import load_recording, merge_recordings
 
 PKG = '''
 def band(n):
@@ -93,8 +93,7 @@ def test_parallel_recording_is_not_empty(tmp_path):
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert os.path.exists(out), proc.stderr
 
-    with open(out, "rb") as fh:
-        records = pickle.load(fh)["records"]
+    records = load_recording(out)["records"]
     assert records, "controller clobbered the workers' recording"
     assert {r["target"] for r in records} >= {"calc:band", "calc:size"}
 
