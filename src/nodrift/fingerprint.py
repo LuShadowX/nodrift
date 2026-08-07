@@ -100,6 +100,32 @@ def fingerprint(obj: object, depth: int = 0, seen: frozenset[int] | None = None)
     if callable(obj) and hasattr(obj, "__qualname__"):
         return ["callable", getattr(obj, "__module__", "?"), obj.__qualname__]
 
+    # numpy.ndarray: shape + dtype + values with float tolerance (lazy import).
+    try:
+        import numpy as np  # type: ignore
+    except ImportError:  # pragma: no cover
+        np = None  # type: ignore
+    if np is not None and isinstance(obj, np.ndarray):
+        # Object arrays fall through to generic handling of each element.
+        if obj.dtype == object:
+            flat = [fingerprint(x, depth + 1, seen) for x in obj.flat[:MAX_ITEMS]]
+            return ["ndarray", list(obj.shape), "object", flat]
+        if np.issubdtype(obj.dtype, np.floating):
+            # Round to a stable decimal so bit-noise does not fail checks.
+            data = np.round(obj.astype(np.float64), decimals=12)
+            return [
+                "ndarray",
+                list(obj.shape),
+                str(obj.dtype),
+                data.reshape(-1)[:MAX_ITEMS].tolist(),
+            ]
+        return [
+            "ndarray",
+            list(obj.shape),
+            str(obj.dtype),
+            obj.reshape(-1)[:MAX_ITEMS].tolist(),
+        ]
+
     # Instances: prefer their own state over repr, since a custom __repr__ may
     # hide fields and a default __repr__ carries an address.
     state = _instance_state(obj)
