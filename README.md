@@ -11,7 +11,8 @@ You changed 200 lines. Your tests pass. Did anything *actually* change?
 
 Tests check what someone remembered to check. `nodrift` compares everything
 observable: return values, exceptions raised, and whether arguments were
-mutated — using the real inputs your test suite already produces.
+mutated, and the files it writes — using the real inputs your test suite
+already produces.
 
 No model reviews the code. The verdict comes from execution.
 
@@ -99,9 +100,9 @@ too big to capture. On `sqlparse`, 40 core functions were skipped for this
 reason. `nodrift` reports them as *not covered* rather than pretending
 otherwise, but the gap is real.
 
-**Side effects are not captured yet.** Network calls, file writes and database
-queries are invisible. Only return values, exceptions and argument mutation are
-compared.
+**Side effects are only partly captured.** File writes are compared (path,
+mode, size and a hash of the bytes). Network calls and database queries are
+still invisible.
 
 **Recording is slow.** Expect roughly an 8x slowdown on the recorded run.
 Tests that assert on wall-clock time may fail while recording.

@@ -16,6 +16,7 @@ import sys
 import types
 
 from .fingerprint import fingerprint
+from .sideeffects import WriteWatcher
 
 CALL_TIMEOUT_SECONDS = 5
 
@@ -112,9 +113,11 @@ def run(recording_path: str, deterministic: bool) -> dict:
             continue
 
         before = fingerprint([args, kwargs])
+        watcher = WriteWatcher()
         signal.alarm(CALL_TIMEOUT_SECONDS)
         try:
-            value = _materialise(func(*args, **kwargs))
+            with watcher:
+                value = _materialise(func(*args, **kwargs))
             outcome = ["return", fingerprint(value)]
         except _Timeout:
             outcome = ["timeout"]
@@ -124,7 +127,7 @@ def run(recording_path: str, deterministic: bool) -> dict:
             signal.alarm(0)
 
         after = fingerprint([args, kwargs])
-        results[key] = [outcome, before == after]
+        results[key] = [outcome, before == after, watcher.summary()]
 
     return results
 
