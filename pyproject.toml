@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nodrift"
+version = "0.1.0"
+description = "Prove a refactor changed nothing — by replaying your tests' real inputs against both versions."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [{ name = "Lukshya Supyal" }]
+keywords = ["testing", "refactoring", "regression", "differential-testing", "pytest"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Software Development :: Testing",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+nodrift = "nodrift.cli:main"
+
+[project.entry-points.pytest11]
+nodrift = "nodrift.plugin"
+
+[project.urls]
+Homepage = "https://github.com/LuShadowX/nodrift"
+Issues = "https://github.com/LuShadowX/nodrift/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nodrift"]

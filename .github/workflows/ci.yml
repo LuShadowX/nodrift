@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.9", "3.11", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install
+        run: python -m pip install --upgrade pip && pip install -e ".[dev]"
+
+      - name: Configure git
+        # The CLI tests create throwaway repositories.
+        run: |
+          git config --global user.email ci@example.com
+          git config --global user.name CI
+
+      - name: Run the test suite
+        run: pytest -q
+
+  smoke:
+    # Drive the real CLI against a throwaway repository: an untouched tree
+    # must report no drift, and an edited one must report drift.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - run: python -m pip install --upgrade pip && pip install -e ".[dev]"
+
+      - name: Build a sample repository
+        run: |
+          mkdir -p /tmp/sample && cd /tmp/sample
+          cat > calc.py <<'EOF'
+          def band(n):
+              return "high" if n > 100 else "low"
+          EOF
+          cat > test_calc.py <<'EOF'
+          import calc
+          def test_band():
+              assert calc.band(5) == "low"
+              assert calc.band(500) == "high"
+          EOF
+          git init -q .
+          git config user.email ci@example.com
+          git config user.name CI
+          git add -A && git commit -qm initial
+
+      - name: Unchanged tree reports no drift
+        run: |
+          cd /tmp/sample
+          PYTHONPATH=. python -m nodrift.cli record --package calc
+          PYTHONPATH=. python -m nodrift.cli check HEAD
+
+      - name: Edited tree reports drift
+        run: |
+          cd /tmp/sample
+          sed -i 's/n > 100/n > 1000/' calc.py
+          if PYTHONPATH=. python -m nodrift.cli check HEAD; then
+            echo "expected nodrift to report a change"; exit 1
+          fi
