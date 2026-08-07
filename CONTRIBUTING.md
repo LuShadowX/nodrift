@@ -75,6 +75,36 @@ The broad areas that need help:
 - If you change what the tool reports, say so plainly in the README. The
   README documents the limits honestly and should stay that way.
 
+## Using AI to contribute
+
+**Using AI is not wrong, and it is not discouraged here.** Plenty of good code
+gets written with it. What matters is the same thing that has always mattered:
+you understood the change, you tested it, and you can defend it in review.
+
+Two things are asked of you:
+
+**1. Say so.** If a patch was substantially written by an AI tool or agent,
+mention it in the pull request description. One line is enough — *"drafted with
+Claude / Copilot / Cursor"*. Nobody will think less of you for it. It simply
+tells the reviewer what to look at more carefully, and undisclosed AI work that
+turns out to be wrong costs far more trust than disclosed work ever could.
+
+**2. Use it carefully.** Read the code you are submitting. Run the tests.
+Check that it does what the issue actually asked for. AI is very good at
+producing changes that look right and are subtly wrong — this project exists
+precisely because that class of bug is hard to catch by reading.
+
+### What will be closed
+
+Fully autonomous agents opening pull requests with no human who has read the
+change, and low-effort patches submitted without being run, will be closed
+without detailed review. Not because a machine wrote them, but because review
+time is the scarce resource here and an unread patch spends it without
+offering anything back.
+
+If you are unsure whether your contribution qualifies, it almost certainly
+does — just disclose it and say what you verified.
+
 ## Reporting a bug
 
 Most valuable of all: **a false positive.** If `nodrift check` reports a
