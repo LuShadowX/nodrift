@@ -55,6 +55,13 @@ class Recorder:
         self.abandon_after = 3
         self._oversized_streak: dict[str, int] = defaultdict(int)
         self._abandoned: set[str] = set()
+        # Adaptive sampling: how many consecutive duplicates before backing
+        # off, and how far back-off is allowed to go.
+        self.backoff_after = 4
+        self.max_skip = 1024
+        self._dup_streak: dict[str, int] = defaultdict(int)
+        self._skip: dict[str, int] = defaultdict(lambda: 1)
+        self._countdown: dict[str, int] = defaultdict(int)
         self.calls: dict[str, dict[str, bytes]] = defaultdict(dict)
         self.recorded_outcome: dict[str, dict[str, list]] = defaultdict(dict)
         self.stats = defaultdict(int)
@@ -179,6 +186,19 @@ class Recorder:
             self.stats["skipped_at_cap"] += 1
             return
 
+        # Whether an input is new is only knowable after pickling it, and hot
+        # functions are called with the same handful of values over and over.
+        # Recording naively therefore spends most of its time serialising
+        # inputs it already has. Once a target starts repeating itself we back
+        # off geometrically, so the cost tracks how much a function still has
+        # left to teach us rather than how often it is called.
+        if self._skip[target] > 1:
+            self._countdown[target] -= 1
+            if self._countdown[target] > 0:
+                self.stats["sampled_out"] += 1
+                return
+            self._countdown[target] = self._skip[target]
+
         _local.busy = True
         try:
             blob = pickle.dumps((args, kwargs), protocol=pickle.HIGHEST_PROTOCOL)
@@ -201,7 +221,21 @@ class Recorder:
         self._oversized_streak[target] = 0
 
         self.stats["captured"] += 1
-        bucket[digest(["blob", len(blob), _cheap_hash(blob)])] = blob
+        key = digest(["blob", len(blob), _cheap_hash(blob)])
+        if key in bucket:
+            # Seen before. Back off, but never so far that a function which
+            # later receives novel inputs stays invisible.
+            self._dup_streak[target] += 1
+            if self._dup_streak[target] >= self.backoff_after:
+                self._skip[target] = min(self._skip[target] * 2 or 2, self.max_skip)
+                self._countdown[target] = self._skip[target]
+                self._dup_streak[target] = 0
+            return
+        # Something new: this function is still productive, so sample it fully
+        # again.
+        self._dup_streak[target] = 0
+        self._skip[target] = 1
+        bucket[key] = blob
 
     # -- teardown -------------------------------------------------------
 

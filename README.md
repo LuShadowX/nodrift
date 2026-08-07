@@ -103,8 +103,8 @@ otherwise, but the gap is real.
 queries are invisible. Only return values, exceptions and argument mutation are
 compared.
 
-**Recording is slow.** Expect a 15–20x slowdown on the recorded run. Tests that
-assert on wall-clock time will fail while recording.
+**Recording is slow.** Expect roughly an 8x slowdown on the recorded run.
+Tests that assert on wall-clock time may fail while recording.
 
 ## Measured behaviour
 

@@ -90,3 +90,36 @@ def test_containers_are_stable(value):
 
 def test_list_and_tuple_are_distinguishable():
     assert fingerprint([1, 2]) != fingerprint((1, 2))
+
+
+def test_sampling_still_records_novel_inputs_after_long_repetition():
+    """Adaptive back-off must not blind a function to new inputs.
+
+    A hot function called thousands of times with the same value backs off to
+    sampling one call in many. If a genuinely new input then arrives, it still
+    has to be recorded — otherwise speed was bought with coverage.
+    """
+    from nodrift.recorder import Recorder
+
+    recorder = Recorder(["_none_"], max_per_target=600)
+
+    for _ in range(5000):
+        recorder._capture("m:f", ("same",), {})
+    assert len(recorder.calls["m:f"]) == 1
+    assert recorder.stats["sampled_out"] > 0, "back-off never engaged"
+
+    # A new value, repeated enough to survive whatever skip factor is active.
+    for _ in range(2000):
+        recorder._capture("m:f", ("different",), {})
+    assert len(recorder.calls["m:f"]) == 2, "novel input was missed"
+
+
+def test_sampling_resets_when_a_function_stays_productive():
+    from nodrift.recorder import Recorder
+
+    recorder = Recorder(["_none_"], max_per_target=600)
+    for i in range(200):
+        recorder._capture("m:g", (i,), {})
+    # Every call was novel, so back-off should never have engaged.
+    assert len(recorder.calls["m:g"]) == 200
+    assert recorder.stats.get("sampled_out", 0) == 0
