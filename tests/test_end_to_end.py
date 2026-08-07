@@ -305,17 +305,27 @@ def test_check_surfaces_a_bad_ref_instead_of_a_name_error(tmp_path):
     assert "NameError" not in combined, combined
 
 
+def test_recordings_are_compressed_on_disk(recorded):
+    """A 4.5k-LOC library produced 68 MB uncompressed; gzip takes it to 3 MB."""
+    _, recording, _ = recorded
+    with open(recording, "rb") as fh:
+        assert fh.read(2) == b"\x1f\x8b", "recording was written uncompressed"
+
+
 def test_legacy_recordings_without_the_payload_wrapper_still_replay(
     recorded, tmp_path
 ):
-    """Recordings made before the wrapper are a bare list, not a dict."""
+    """Recordings made before the wrapper are a bare, uncompressed list.
+
+    Covers both migrations at once: no gzip header and no payload dict.
+    """
     import pickle
 
     from nodrift.cli import _load_abandoned
+    from nodrift.recorder import load_recording
 
     project, recording, _ = recorded
-    with open(recording, "rb") as fh:
-        payload = pickle.load(fh)
+    payload = load_recording(recording)
 
     legacy = str(tmp_path / "legacy.pkl")
     with open(legacy, "wb") as fh:
@@ -330,25 +340,34 @@ def test_legacy_recordings_without_the_payload_wrapper_still_replay(
 
 def test_merge_keeps_every_workers_abandoned_targets(tmp_path):
     """Under xdist the merge is the only place the union can be formed."""
-    import pickle
-
-    from nodrift.recorder import merge_recordings
+    from nodrift.recorder import load_recording, merge_recordings, write_recording
 
     shards = []
     for index, names in enumerate((["a:one"], ["a:two", "a:one"])):
         shard = str(tmp_path / f"shard.gw{index}")
-        with open(shard, "wb") as fh:
-            pickle.dump(
-                {"version": 1,
-                 "records": [{"target": "a:kept", "args": b"%d" % index}],
-                 "abandoned": names},
-                fh,
-            )
+        write_recording(
+            shard, [{"target": "a:kept", "args": b"%d" % index}], names,
+        )
         shards.append(shard)
 
     out = str(tmp_path / "merged.pkl")
     summary = merge_recordings(shards, out)
 
     assert summary["abandoned"] == ["a:one", "a:two"]
-    with open(out, "rb") as fh:
-        assert pickle.load(fh)["abandoned"] == ["a:one", "a:two"]
+    assert load_recording(out)["abandoned"] == ["a:one", "a:two"]
+
+
+def test_merge_reads_uncompressed_shards_from_an_older_nodrift(tmp_path):
+    """A half-upgraded install must not silently drop a worker's inputs."""
+    import pickle
+
+    from nodrift.recorder import load_recording, merge_recordings
+
+    shard = str(tmp_path / "old.gw0")
+    with open(shard, "wb") as fh:
+        pickle.dump([{"target": "a:kept", "args": b"1"}], fh)
+
+    out = str(tmp_path / "merged.pkl")
+    merge_recordings([shard], out)
+
+    assert load_recording(out)["records"] == [{"target": "a:kept", "args": b"1"}]

@@ -16,6 +16,7 @@ import sys
 import types
 
 from .fingerprint import fingerprint
+from .recorder import load_recording
 from .sideeffects import WriteWatcher
 
 CALL_TIMEOUT_SECONDS = 5
@@ -85,10 +86,7 @@ def run(recording_path: str, deterministic: bool) -> dict:
     if deterministic:
         _install_determinism_controls()
 
-    with open(recording_path, "rb") as fh:
-        payload = pickle.load(fh)
-    # Recordings written before the payload wrapper are a bare list of records.
-    records = payload["records"] if isinstance(payload, dict) else payload
+    records = load_recording(recording_path)["records"]
 
     signal.signal(signal.SIGALRM, _alarm)
     results: dict[str, list] = {}

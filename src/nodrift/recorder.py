@@ -9,6 +9,7 @@ already flowing through.
 from __future__ import annotations
 
 import functools
+import gzip
 import pickle
 import sys
 import threading
@@ -18,6 +19,37 @@ from collections import defaultdict
 from .fingerprint import digest, fingerprint
 
 _local = threading.local()
+
+_GZIP_MAGIC = b"\x1f\x8b"
+# Measured on sqlparse: 68.8 MB -> 3.0 MB (23x) for 0.6s. lzma reaches 116x
+# but costs 6.5s to write and 5x more to read, and `check` reads the recording
+# three times per run — so the cheap codec wins on the axis that repeats.
+_COMPRESS_LEVEL = 6
+
+
+def write_recording(path: str, records: list[dict], abandoned: list[str]) -> None:
+    with gzip.open(path, "wb", compresslevel=_COMPRESS_LEVEL) as fh:
+        pickle.dump(
+            {"version": 1, "records": records, "abandoned": abandoned},
+            fh, protocol=pickle.HIGHEST_PROTOCOL,
+        )
+
+
+def load_recording(path: str) -> dict:
+    """Read a recording, whatever shape or encoding it was written in.
+
+    Both the payload wrapper and compression arrived after 0.1.0, so the file
+    is sniffed rather than trusted: recordings already on disk keep working,
+    and a bare list simply has no abandoned functions to report.
+    """
+    with open(path, "rb") as fh:
+        compressed = fh.read(2) == _GZIP_MAGIC
+    opener = gzip.open if compressed else open
+    with opener(path, "rb") as fh:
+        payload = pickle.load(fh)
+    if isinstance(payload, dict):
+        return payload
+    return {"version": 1, "records": payload, "abandoned": []}
 
 # Dunders that carry observable behaviour and are safe to intercept.
 DUNDER_ALLOW = frozenset({
@@ -65,6 +97,10 @@ class Recorder:
         self.calls: dict[str, dict[str, bytes]] = defaultdict(dict)
         self.recorded_outcome: dict[str, dict[str, list]] = defaultdict(dict)
         self.stats = defaultdict(int)
+        # Guards every counter below. A threaded suite would otherwise exceed
+        # max_per_target, lose stat counts, and make back-off erratic — the
+        # numbers the user is shown have to be true.
+        self._lock = threading.Lock()
         self._patched: list[tuple[object, str, object]] = []
         self._wrapped_ids: set[int] = set()
 
@@ -179,63 +215,76 @@ class Recorder:
         # calls that originate from our own machinery.
         if getattr(_local, "busy", False):
             return
-        if target in self._abandoned:
-            return
-        bucket = self.calls[target]
-        if len(bucket) >= self.max_per_target:
-            self.stats["skipped_at_cap"] += 1
-            return
-
-        # Whether an input is new is only knowable after pickling it, and hot
-        # functions are called with the same handful of values over and over.
-        # Recording naively therefore spends most of its time serialising
-        # inputs it already has. Once a target starts repeating itself we back
-        # off geometrically, so the cost tracks how much a function still has
-        # left to teach us rather than how often it is called.
-        if self._skip[target] > 1:
-            self._countdown[target] -= 1
-            if self._countdown[target] > 0:
-                self.stats["sampled_out"] += 1
+        with self._lock:
+            if target in self._abandoned:
                 return
-            self._countdown[target] = self._skip[target]
+            bucket = self.calls[target]
+            if len(bucket) >= self.max_per_target:
+                self.stats["skipped_at_cap"] += 1
+                return
 
+            # Whether an input is new is only knowable after pickling it, and
+            # hot functions are called with the same handful of values over and
+            # over. Recording naively therefore spends most of its time
+            # serialising inputs it already has. Once a target starts repeating
+            # itself we back off geometrically, so the cost tracks how much a
+            # function still has left to teach us rather than how often it is
+            # called.
+            if self._skip[target] > 1:
+                self._countdown[target] -= 1
+                if self._countdown[target] > 0:
+                    self.stats["sampled_out"] += 1
+                    return
+                self._countdown[target] = self._skip[target]
+
+        # Pickling stays outside the lock: it is the expensive part, and
+        # serialising threads on it would make recording a bottleneck rather
+        # than an observer.
         _local.busy = True
         try:
             blob = pickle.dumps((args, kwargs), protocol=pickle.HIGHEST_PROTOCOL)
         except Exception:
-            self.stats["unpicklable"] += 1
+            with self._lock:
+                self.stats["unpicklable"] += 1
             return
         finally:
             _local.busy = False
 
-        if len(blob) > self.max_blob_bytes:
-            self.stats["oversized"] += 1
-            # Paying the pickle cost only to discard the result is what makes
-            # recursive parsers unrecordable. Once a target has produced
-            # oversized inputs repeatedly, stop attempting it at all.
-            self._oversized_streak[target] += 1
-            if self._oversized_streak[target] >= self.abandon_after:
-                self._abandoned.add(target)
-                self.stats["abandoned_targets"] += 1
-            return
-        self._oversized_streak[target] = 0
+        with self._lock:
+            if len(blob) > self.max_blob_bytes:
+                self.stats["oversized"] += 1
+                # Paying the pickle cost only to discard the result is what
+                # makes recursive parsers unrecordable. Once a target has
+                # produced oversized inputs repeatedly, stop attempting it.
+                self._oversized_streak[target] += 1
+                if self._oversized_streak[target] >= self.abandon_after:
+                    self._abandoned.add(target)
+                    self.stats["abandoned_targets"] += 1
+                return
+            self._oversized_streak[target] = 0
 
-        self.stats["captured"] += 1
-        key = digest(["blob", len(blob), _cheap_hash(blob)])
-        if key in bucket:
-            # Seen before. Back off, but never so far that a function which
-            # later receives novel inputs stays invisible.
-            self._dup_streak[target] += 1
-            if self._dup_streak[target] >= self.backoff_after:
-                self._skip[target] = min(self._skip[target] * 2 or 2, self.max_skip)
-                self._countdown[target] = self._skip[target]
-                self._dup_streak[target] = 0
-            return
-        # Something new: this function is still productive, so sample it fully
-        # again.
-        self._dup_streak[target] = 0
-        self._skip[target] = 1
-        bucket[key] = blob
+            self.stats["captured"] += 1
+            key = digest(["blob", len(blob), _cheap_hash(blob)])
+            if key in bucket:
+                # Seen before. Back off, but never so far that a function which
+                # later receives novel inputs stays invisible.
+                self._dup_streak[target] += 1
+                if self._dup_streak[target] >= self.backoff_after:
+                    self._skip[target] = min(
+                        self._skip[target] * 2 or 2, self.max_skip)
+                    self._countdown[target] = self._skip[target]
+                    self._dup_streak[target] = 0
+                return
+            # The cap was checked before pickling; another thread may have
+            # filled the bucket while this call was serialising.
+            if len(bucket) >= self.max_per_target:
+                self.stats["skipped_at_cap"] += 1
+                return
+            # Something new: this function is still productive, so sample it
+            # fully again.
+            self._dup_streak[target] = 0
+            self._skip[target] = 1
+            bucket[key] = blob
 
     # -- teardown -------------------------------------------------------
 
@@ -253,14 +302,10 @@ class Recorder:
             for blob in bucket.values():
                 records.append({"target": target, "args": blob})
         abandoned = sorted(self._abandoned)
-        with open(path, "wb") as fh:
-            # The abandoned list travels with the recording: `check` runs in a
-            # later process and has no other way to know which functions its
-            # verdict does not cover.
-            pickle.dump(
-                {"version": 1, "records": records, "abandoned": abandoned},
-                fh, protocol=pickle.HIGHEST_PROTOCOL,
-            )
+        # The abandoned list travels with the recording: `check` runs in a
+        # later process and has no other way to know which functions its
+        # verdict does not cover.
+        write_recording(path, records, abandoned)
         summary = {
             "targets": len(self.calls),
             "records": len(records),
@@ -298,18 +343,13 @@ def merge_recordings(shards: list[str], out: str, cap: int | None = None) -> dic
 
     for shard in shards:
         try:
-            with open(shard, "rb") as fh:
-                payload = pickle.load(fh)
+            payload = load_recording(shard)
         except Exception:
             continue
-        if isinstance(payload, dict):
-            # A target any worker gave up on is not fully covered overall,
-            # even if another worker happened to capture some of its inputs.
-            abandoned.update(payload.get("abandoned") or [])
-            records = payload.get("records", [])
-        else:  # recording written before the payload wrapper existed
-            records = payload
-        for record in records:
+        # A target any worker gave up on is not fully covered overall, even if
+        # another worker happened to capture some of its inputs.
+        abandoned.update(payload.get("abandoned") or [])
+        for record in payload.get("records", []):
             target = record["target"]
             key = (target, record["args"])
             if key in seen:
@@ -321,11 +361,7 @@ def merge_recordings(shards: list[str], out: str, cap: int | None = None) -> dic
             per_target[target] += 1
             merged.append(record)
 
-    with open(out, "wb") as fh:
-        pickle.dump(
-            {"version": 1, "records": merged, "abandoned": sorted(abandoned)},
-            fh, protocol=pickle.HIGHEST_PROTOCOL,
-        )
+    write_recording(out, merged, sorted(abandoned))
 
     return {
         "shards": len(shards),

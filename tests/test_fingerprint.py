@@ -123,3 +123,64 @@ def test_sampling_resets_when_a_function_stays_productive():
     # Every call was novel, so back-off should never have engaged.
     assert len(recorder.calls["m:g"]) == 200
     assert recorder.stats.get("sampled_out", 0) == 0
+
+
+def test_the_cap_holds_when_threads_record_at_once():
+    """A threaded suite must not be able to record past max_per_target.
+
+    Every input here is novel, so nothing is deduplicated away and the cap is
+    the only thing standing between eight threads and an oversized recording.
+    """
+    import threading
+
+    from nodrift.recorder import Recorder
+
+    cap = 50
+    recorder = Recorder(["_none_"], max_per_target=cap)
+    threads = [
+        threading.Thread(
+            target=lambda w=worker: [
+                recorder._capture("m:h", (w, i), {}) for i in range(200)
+            ]
+        )
+        for worker in range(8)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert len(recorder.calls["m:h"]) == cap, "cap exceeded under concurrency"
+
+
+def test_stats_add_up_when_threads_record_at_once():
+    """Lost counter increments would make the reported numbers untrue."""
+    import threading
+
+    from nodrift.recorder import Recorder
+
+    calls_per_thread, workers = 200, 8
+    recorder = Recorder(["_none_"], max_per_target=10_000)
+    threads = [
+        threading.Thread(
+            target=lambda w=worker: [
+                recorder._capture("m:i", (w, i), {}) for i in range(calls_per_thread)
+            ]
+        )
+        for worker in range(workers)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    total = calls_per_thread * workers
+    accounted = (
+        recorder.stats["captured"]
+        + recorder.stats["sampled_out"]
+        + recorder.stats["skipped_at_cap"]
+        + recorder.stats["unpicklable"]
+        + recorder.stats["oversized"]
+    )
+    assert accounted == total, f"{total - accounted} calls unaccounted for"
+    assert len(recorder.calls["m:i"]) == recorder.stats["captured"]

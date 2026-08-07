@@ -9,7 +9,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import pickle
 import shutil
 import subprocess
 import sys
@@ -110,16 +109,10 @@ def _replay(recording: str, source_root: str, out: str, sub: str) -> None:
 
 
 def _load_abandoned(recording: str) -> list[str]:
-    """Functions the recorder gave up on, as carried by the recording.
+    """Functions the recorder gave up on, as carried by the recording."""
+    from .recorder import load_recording
 
-    Recordings written before the payload wrapper are a bare list and have
-    nothing to report; that is a missing field, not a corrupt file.
-    """
-    with open(recording, "rb") as fh:
-        payload = pickle.load(fh)
-    if isinstance(payload, dict):
-        return list(payload.get("abandoned") or [])
-    return []
+    return list(load_recording(recording).get("abandoned") or [])
 
 
 def cmd_check(args: argparse.Namespace) -> int:
