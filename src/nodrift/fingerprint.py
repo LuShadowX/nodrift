@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import math
+import sys
 
 _ADDR = re.compile(r"0x[0-9a-fA-F]{4,}")
 MAX_DEPTH = 8
@@ -99,6 +100,25 @@ def fingerprint(obj: object, depth: int = 0, seen: frozenset[int] | None = None)
 
     if callable(obj) and hasattr(obj, "__qualname__"):
         return ["callable", getattr(obj, "__module__", "?"), obj.__qualname__]
+
+    # numpy arrays compare by shape, dtype and contents. Looked up through
+    # sys.modules rather than imported: a project that never uses numpy must
+    # not pay to import it, and one that does has already imported it by the
+    # time its own functions are being replayed.
+    numpy = sys.modules.get("numpy")
+    if numpy is not None and isinstance(obj, numpy.ndarray):
+        # Elements go back through fingerprint(), so an array of floats and a
+        # list of the same floats answer identically — exactly, with no
+        # tolerance, and with nan/inf named rather than left to compare by
+        # accident. Tolerance would be a policy decision for every type at
+        # once, not something to introduce for one container.
+        flat = obj.reshape(-1)[:MAX_ITEMS].tolist()
+        return [
+            "ndarray",
+            list(obj.shape),
+            str(obj.dtype),
+            [fingerprint(item, depth + 1, seen) for item in flat],
+        ]
 
     # Instances: prefer their own state over repr, since a custom __repr__ may
     # hide fields and a default __repr__ carries an address.
