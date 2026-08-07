@@ -252,15 +252,22 @@ class Recorder:
         for target, bucket in self.calls.items():
             for blob in bucket.values():
                 records.append({"target": target, "args": blob})
+        abandoned = sorted(self._abandoned)
         with open(path, "wb") as fh:
-            pickle.dump(records, fh, protocol=pickle.HIGHEST_PROTOCOL)
+            # The abandoned list travels with the recording: `check` runs in a
+            # later process and has no other way to know which functions its
+            # verdict does not cover.
+            pickle.dump(
+                {"version": 1, "records": records, "abandoned": abandoned},
+                fh, protocol=pickle.HIGHEST_PROTOCOL,
+            )
         summary = {
             "targets": len(self.calls),
             "records": len(records),
             **dict(self.stats),
             # Named explicitly: these functions are simply not covered, and a
             # silent gap would read as "verified" when it is not.
-            "abandoned": sorted(self._abandoned),
+            "abandoned": abandoned,
         }
         return summary
 
@@ -286,16 +293,22 @@ def merge_recordings(shards: list[str], out: str, cap: int | None = None) -> dic
     seen: set[tuple[str, bytes]] = set()
     per_target: dict[str, int] = defaultdict(int)
     merged: list[dict] = []
+    abandoned: set[str] = set()
     dropped = 0
 
     for shard in shards:
         try:
             with open(shard, "rb") as fh:
-                records = pickle.load(fh)
+                payload = pickle.load(fh)
         except Exception:
             continue
-        if isinstance(records, dict):  # tolerate richer payloads
-            records = records.get("records", [])
+        if isinstance(payload, dict):
+            # A target any worker gave up on is not fully covered overall,
+            # even if another worker happened to capture some of its inputs.
+            abandoned.update(payload.get("abandoned") or [])
+            records = payload.get("records", [])
+        else:  # recording written before the payload wrapper existed
+            records = payload
         for record in records:
             target = record["target"]
             key = (target, record["args"])
@@ -309,11 +322,15 @@ def merge_recordings(shards: list[str], out: str, cap: int | None = None) -> dic
             merged.append(record)
 
     with open(out, "wb") as fh:
-        pickle.dump(merged, fh, protocol=pickle.HIGHEST_PROTOCOL)
+        pickle.dump(
+            {"version": 1, "records": merged, "abandoned": sorted(abandoned)},
+            fh, protocol=pickle.HIGHEST_PROTOCOL,
+        )
 
     return {
         "shards": len(shards),
         "records": len(merged),
         "targets": len({r["target"] for r in merged}),
         "dropped_over_cap": dropped,
+        "abandoned": sorted(abandoned),
     }
