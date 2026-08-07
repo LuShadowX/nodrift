@@ -7,7 +7,7 @@ values, exceptions, and argument mutation.
 No model reviews the code. The verdict comes from execution.
 """
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 from .compare import compare
 from .fingerprint import fingerprint

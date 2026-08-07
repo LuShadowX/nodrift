@@ -40,7 +40,11 @@ here is the difference.**
 pip install nodrift
 ```
 
-Requires Python 3.9+. Unix only for now (the per-call timeout uses `SIGALRM`).
+Requires Python 3.9+. Unix only for now: the per-call timeout is portable as
+of 0.1.2, but per-run temporary directories are still scrubbed with POSIX
+paths, so on Windows identical code would compare unequal ([#17]).
+
+[#17]: https://github.com/LuShadowX/nodrift/issues/17
 
 ## Use
 
