@@ -184,3 +184,79 @@ def test_stats_add_up_when_threads_record_at_once():
     )
     assert accounted == total, f"{total - accounted} calls unaccounted for"
     assert len(recorder.calls["m:i"]) == recorder.stats["captured"]
+
+
+# --------------------------------------------------------------------------
+# numpy arrays
+# --------------------------------------------------------------------------
+
+def test_numpy_is_not_imported_for_projects_that_do_not_use_it():
+    """Looking numpy up in sys.modules must never trigger an import.
+
+    A project that has nothing to do with numpy should not pay ~100ms and the
+    memory to load it because the fingerprinter went looking.
+    """
+    import sys
+
+    real = sys.modules.pop("numpy", None)
+    try:
+        fingerprint({"a": [1, 2.5, "x"], "b": (None, True)})
+        assert "numpy" not in sys.modules, "fingerprint imported numpy"
+    finally:
+        if real is not None:
+            sys.modules["numpy"] = real
+
+
+def test_numpy_shape_and_dtype_are_part_of_the_answer():
+    np = pytest.importorskip("numpy")
+
+    assert fingerprint(np.zeros((2, 3))) != fingerprint(np.zeros((3, 2)))
+    assert fingerprint(np.zeros(3, dtype="int32")) != fingerprint(
+        np.zeros(3, dtype="int64")
+    )
+    assert fingerprint(np.arange(6)) == fingerprint(np.arange(6))
+
+
+def test_numpy_floats_are_compared_the_same_way_scalars_are():
+    """One tolerance question, one answer, whatever the container.
+
+    A rounding-based tolerance would give a different verdict for a float in
+    an array than for the same float on its own, and the size of that
+    tolerance would depend on the magnitude of the value.
+    """
+    np = pytest.importorskip("numpy")
+
+    for magnitude in (1.0, 1e6, 1e12, 1e18):
+        noisy = magnitude * (1 + 1e-15)
+        scalars_agree = fingerprint(magnitude) == fingerprint(noisy)
+        arrays_agree = fingerprint(np.array([magnitude])) == fingerprint(
+            np.array([noisy])
+        )
+        assert scalars_agree == arrays_agree, f"disagreed at {magnitude:g}"
+
+
+def test_numpy_nan_does_not_depend_on_an_identity_shortcut():
+    """`nan != nan`, so returning raw floats makes equality accidental.
+
+    Naming nan the way the scalar path does keeps the answer stable through
+    the JSON round trip the comparison actually performs.
+    """
+    import json
+
+    np = pytest.importorskip("numpy")
+
+    a = fingerprint(np.array([np.nan, np.inf, -np.inf]))
+    b = fingerprint(np.array([np.nan, np.inf, -np.inf]))
+    assert a == b, "nan arrays disagree in process"
+    assert json.loads(json.dumps(a)) == json.loads(json.dumps(b))
+    assert a[3] == [["float", "nan"], ["float", "inf"], ["float", "-inf"]], a
+
+
+def test_numpy_object_arrays_recurse():
+    np = pytest.importorskip("numpy")
+
+    a = np.array([{"k": 1}, [2, 3]], dtype=object)
+    b = np.array([{"k": 1}, [2, 3]], dtype=object)
+    c = np.array([{"k": 2}, [2, 3]], dtype=object)
+    assert fingerprint(a) == fingerprint(b)
+    assert fingerprint(a) != fingerprint(c)
