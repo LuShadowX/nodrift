@@ -118,7 +118,7 @@ class Recorder:
         self._dup_streak: dict[str, int] = defaultdict(int)
         self._skip: dict[str, int] = defaultdict(lambda: 1)
         self._countdown: dict[str, int] = defaultdict(int)
-        self.calls: dict[str, dict[str, bytes]] = defaultdict(dict)
+        self.calls: dict[str, dict[bytes, bytes]] = defaultdict(dict)
         self.recorded_outcome: dict[str, dict[str, list]] = defaultdict(dict)
         self.stats = defaultdict(int)
         # Guards every counter below. A threaded suite would otherwise exceed
@@ -324,8 +324,11 @@ class Recorder:
             self._oversized_streak[target] = 0
 
             self.stats["captured"] += 1
-            key = digest(["blob", len(blob), _cheap_hash(blob)])
-            if key in bucket:
+            # The pickled bytes are themselves the identity of the input, so
+            # they are the key. Hashing them into a digest first cost a full
+            # blake2b pass over every blob plus a JSON round-trip, to produce
+            # something no more precise than the bytes it replaced.
+            if blob in bucket:
                 # Seen before. Back off, but never so far that a function which
                 # later receives novel inputs stays invisible.
                 self._dup_streak[target] += 1
@@ -344,7 +347,7 @@ class Recorder:
             # fully again.
             self._dup_streak[target] = 0
             self._skip[target] = 1
-            bucket[key] = blob
+            bucket[blob] = blob
 
     # -- teardown -------------------------------------------------------
 
