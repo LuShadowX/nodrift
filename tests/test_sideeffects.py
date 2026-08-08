@@ -133,8 +133,11 @@ def test_write_change_is_detected_though_return_value_is_identical(tmp_path):
     recording = str(tmp_path / "rec.pkl")
 
     proc = subprocess.run(
-        [sys.executable, "-m", "pytest", str(project), "-q", "-p", "no:cacheprovider",
+        [sys.executable, "-m", "pytest", ".", "-q", "-p", "no:cacheprovider",
          "--nodrift", "app", "--nodrift-out", recording],
+        # See the note in test_end_to_end.py: an absolute path sends pytest's
+        # rootdir search up to C:\ on Windows.
+        cwd=str(project),
         capture_output=True, text=True,
         env=dict(os.environ, PYTHONPATH=str(project)),
     )
@@ -158,3 +161,52 @@ def test_write_change_is_detected_though_return_value_is_identical(tmp_path):
         "a changed file write went unnoticed; the return value is 'ok' either way"
     )
     assert any("save" in target for target in report["changed"])
+
+
+# --------------------------------------------------------------------------
+# path scrubbing across operating systems
+# --------------------------------------------------------------------------
+
+def test_windows_temp_directories_are_scrubbed():
+    """The per-run segment has to go, whichever OS wrote the path.
+
+    Cause 4 of the false positives fixed in 0.1.0 was a per-run temp directory
+    surviving into a recorded write path. The patterns that fixed it were
+    POSIX-only, so on Windows two runs of identical code compared unequal.
+    Asserted against literal Windows paths so it holds on any host.
+    """
+    from nodrift.sideeffects import _TEMPISH, _slash
+
+    def scrub(path):
+        return _TEMPISH.sub(r"\1/<tmp>", _slash(path))
+
+    first = scrub(r"C:\Users\lu\AppData\Local\Temp\nodrift-a1b2\out.txt")
+    second = scrub(r"C:\Users\lu\AppData\Local\Temp\nodrift-z9y8\out.txt")
+    assert first == second == "C:/Users/lu/AppData/Local/Temp/<tmp>/out.txt"
+
+    # Drive letter and casing vary on Windows; the pattern must not care.
+    assert scrub(r"d:\users\lu\appdata\local\temp\xyz\out.txt").endswith(
+        "/<tmp>/out.txt"
+    )
+    assert scrub(r"C:\Windows\Temp\abc\log.txt") == "C:/Windows/Temp/<tmp>/log.txt"
+
+
+def test_posix_temp_directories_are_still_scrubbed():
+    """The Windows patterns must not have displaced the existing ones."""
+    from nodrift.sideeffects import _TEMPISH, _slash
+
+    def scrub(path):
+        return _TEMPISH.sub(r"\1/<tmp>", _slash(path))
+
+    assert scrub("/tmp/nodrift-a1b2/out.txt") == "/tmp/<tmp>/out.txt"
+    assert (
+        scrub("/private/var/folders/xy/hash1234/T/nodrift-a1/out.txt")
+        == "/private/var/folders/xy/hash1234/T/<tmp>/out.txt"
+    )
+
+
+def test_paths_inside_the_root_come_back_with_forward_slashes(tmp_path):
+    """Recordings must not differ by separator alone."""
+    root = str(tmp_path)
+    nested = os.path.join(root, "pkg", "data", "out.txt")
+    assert normalise(nested, root=root) == "pkg/data/out.txt"

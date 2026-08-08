@@ -89,8 +89,12 @@ def recorded(tmp_path):
 
     recording = str(tmp_path / "recording.pkl")
     proc = subprocess.run(
-        [sys.executable, "-m", "pytest", str(project), "-q", "-p", "no:cacheprovider",
+        [sys.executable, "-m", "pytest", ".", "-q", "-p", "no:cacheprovider",
          "--nodrift", "toy", "--nodrift-out", recording],
+        # Run from inside the project. Given an absolute path, pytest walks up
+        # looking for a rootdir, and on Windows that reaches C:\ and dies on
+        # the permission-denied "Documents and Settings" junction.
+        cwd=str(project),
         capture_output=True, text=True,
         env=dict(os.environ, PYTHONPATH=str(project)),
     )
