@@ -56,6 +56,28 @@ def _git(*argv: str, cwd: str | None = None) -> str:
     ).stdout.strip()
 
 
+def _strip_bytecode(root: str) -> None:
+    """Delete compiled bytecode from a staged tree.
+
+    A repository with `__pycache__` committed — or a stray `.pyc` — hands the
+    replay bytecode compiled from *other* source. Python will run it in
+    preference to the file we just materialised, so `check` reports no
+    behaviour change while the two versions genuinely differ. Silent, and
+    worse than an error.
+    """
+    for dirpath, dirnames, filenames in os.walk(root):
+        if os.path.basename(dirpath) == "__pycache__":
+            shutil.rmtree(dirpath, ignore_errors=True)
+            dirnames[:] = []
+            continue
+        for name in filenames:
+            if name.endswith((".pyc", ".pyo")):
+                try:
+                    os.remove(os.path.join(dirpath, name))
+                except OSError:
+                    pass
+
+
 def _export(ref: str, dest: str) -> None:
     """Materialise `ref` into `dest` (which is emptied first)."""
     if os.path.exists(dest):
@@ -66,6 +88,7 @@ def _export(ref: str, dest: str) -> None:
         capture_output=True, check=True,
     ).stdout
     subprocess.run(["tar", "-x", "-C", dest], input=archive, check=True)
+    _strip_bytecode(dest)
 
 
 def _export_worktree(dest: str) -> None:
@@ -80,6 +103,7 @@ def _export_worktree(dest: str) -> None:
         target = os.path.join(dest, rel)
         os.makedirs(os.path.dirname(target), exist_ok=True)
         shutil.copy2(src, target)
+    _strip_bytecode(dest)
 
 
 def _replay(recording: str, source_root: str, out: str, sub: str) -> None:
@@ -136,6 +160,8 @@ def cmd_check(args: argparse.Namespace) -> int:
         base_2 = os.path.join(results, "base2.json")
         head = os.path.join(results, "head.json")
 
+        candidate = getattr(args, "against", None)
+
         print(f"nodrift: replaying {args.ref} ...", file=sys.stderr)
         _export(args.ref, stage)
         _replay(recording, stage, base_1, args.subdir)
@@ -143,8 +169,14 @@ def cmd_check(args: argparse.Namespace) -> int:
         # nondeterministic and cannot support a claim either way.
         _replay(recording, stage, base_2, args.subdir)
 
-        print("nodrift: replaying working tree ...", file=sys.stderr)
-        _export_worktree(stage)
+        # With no second ref the candidate is the working tree, which is the
+        # common case: check what you are about to commit.
+        print(f"nodrift: replaying {candidate or 'working tree'} ...",
+              file=sys.stderr)
+        if candidate:
+            _export(candidate, stage)
+        else:
+            _export_worktree(stage)
         _replay(recording, stage, head, args.subdir)
 
         report = compare(base_1, head, base_2)
@@ -233,7 +265,10 @@ def main(argv: list[str] | None = None) -> int:
 
     chk = sub.add_parser("check", help="compare a git ref against the working tree")
     chk.add_argument("ref", nargs="?", default="HEAD",
-                     help="git ref to compare against (default HEAD)")
+                     help="git ref to treat as the baseline (default HEAD)")
+    chk.add_argument("against", nargs="?", default=None,
+                     help="second ref to compare with; defaults to the "
+                          "working tree")
     chk.add_argument("--recording", "-r", default=None)
     chk.add_argument("--subdir", default="",
                      help="path within the repo holding the package (e.g. src)")
