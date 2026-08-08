@@ -65,8 +65,9 @@ The broad areas that need help:
   compare by shape, dtype and contents with no tolerance, and datetimes and
   UUIDs are quarantined rather than normalised (issue #12). Reopening either
   means naming the real change the new policy would hide.
-- **Performance.** Recording currently costs ~8x. `sys.monitoring`
-  (Python 3.12+) should be much cheaper than wrapping functions.
+- **Performance.** Recording currently costs ~4x. Note that `sys.monitoring`
+  (Python 3.12+) is *not* the lever it looks like: profiling shows function
+  interception costs about 1% of the overhead, and serialisation the rest.
 - **Portability.** Windows is supported and tested in CI. Where `SIGALRM`
   does not exist the per-call timeout falls back to a watchdog thread, which
   cannot interrupt a call blocked inside C code.
