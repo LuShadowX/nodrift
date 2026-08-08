@@ -133,8 +133,11 @@ def test_write_change_is_detected_though_return_value_is_identical(tmp_path):
     recording = str(tmp_path / "rec.pkl")
 
     proc = subprocess.run(
-        [sys.executable, "-m", "pytest", str(project), "-q", "-p", "no:cacheprovider",
+        [sys.executable, "-m", "pytest", ".", "-q", "-p", "no:cacheprovider",
          "--nodrift", "app", "--nodrift-out", recording],
+        # See the note in test_end_to_end.py: an absolute path sends pytest's
+        # rootdir search up to C:\ on Windows.
+        cwd=str(project),
         capture_output=True, text=True,
         env=dict(os.environ, PYTHONPATH=str(project)),
     )
