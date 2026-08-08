@@ -473,3 +473,51 @@ def test_both_timeout_mechanisms_replay_a_recording_identically(
     stable = {key for key, value in first.items() if second.get(key) == value}
     assert stable, "replay produced nothing deterministic to compare"
     assert {k: with_watchdog[k] for k in stable} == {k: first[k] for k in stable}
+
+
+def test_check_compares_two_arbitrary_refs(tmp_path):
+    """`nodrift check A B` must compare the two commits, not the worktree.
+
+    Reviewing someone else's branch, or auditing a release, means comparing
+    two commits neither of which is checked out.
+    """
+    repo = _git_repo(tmp_path)
+    _nodrift(repo, "record", "--package", "shapes")
+
+    def commit(message):
+        subprocess.run(["git", "add", "-A"], cwd=str(repo), check=True,
+                       capture_output=True)
+        subprocess.run(
+            ["git", "-c", "user.email=t@t", "-c", "user.name=t",
+             "commit", "-qm", message],
+            cwd=str(repo), check=True, capture_output=True,
+        )
+
+    source = (repo / "shapes.py").read_text()
+    (repo / "shapes.py").write_text(
+        source.replace('return "positive"', 'return "POSITIVE"'))
+    commit("change the label")
+
+    # Put the working tree back to the original, so a comparison that used it
+    # instead of the second ref would wrongly report no change.
+    (repo / "shapes.py").write_text(source)
+
+    changed = _nodrift(repo, "check", "HEAD~1", "HEAD")
+    assert changed.returncode == 1, changed.stdout + changed.stderr
+    assert "behave differently" in changed.stdout
+
+    same = _nodrift(repo, "check", "HEAD~1", "HEAD~1")
+    assert same.returncode == 0, same.stdout + same.stderr
+
+
+def test_check_still_defaults_to_the_working_tree(tmp_path):
+    repo = _git_repo(tmp_path)
+    _nodrift(repo, "record", "--package", "shapes")
+
+    source = (repo / "shapes.py").read_text()
+    (repo / "shapes.py").write_text(
+        source.replace('return "positive"', 'return "POSITIVE"'))
+
+    changed = _nodrift(repo, "check", "HEAD")
+    assert changed.returncode == 1, changed.stdout + changed.stderr
+    assert "working tree" in changed.stderr

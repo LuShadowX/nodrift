@@ -136,6 +136,8 @@ def cmd_check(args: argparse.Namespace) -> int:
         base_2 = os.path.join(results, "base2.json")
         head = os.path.join(results, "head.json")
 
+        candidate = getattr(args, "against", None)
+
         print(f"nodrift: replaying {args.ref} ...", file=sys.stderr)
         _export(args.ref, stage)
         _replay(recording, stage, base_1, args.subdir)
@@ -143,8 +145,14 @@ def cmd_check(args: argparse.Namespace) -> int:
         # nondeterministic and cannot support a claim either way.
         _replay(recording, stage, base_2, args.subdir)
 
-        print("nodrift: replaying working tree ...", file=sys.stderr)
-        _export_worktree(stage)
+        # With no second ref the candidate is the working tree, which is the
+        # common case: check what you are about to commit.
+        print(f"nodrift: replaying {candidate or 'working tree'} ...",
+              file=sys.stderr)
+        if candidate:
+            _export(candidate, stage)
+        else:
+            _export_worktree(stage)
         _replay(recording, stage, head, args.subdir)
 
         report = compare(base_1, head, base_2)
@@ -233,7 +241,10 @@ def main(argv: list[str] | None = None) -> int:
 
     chk = sub.add_parser("check", help="compare a git ref against the working tree")
     chk.add_argument("ref", nargs="?", default="HEAD",
-                     help="git ref to compare against (default HEAD)")
+                     help="git ref to treat as the baseline (default HEAD)")
+    chk.add_argument("against", nargs="?", default=None,
+                     help="second ref to compare with; defaults to the "
+                          "working tree")
     chk.add_argument("--recording", "-r", default=None)
     chk.add_argument("--subdir", default="",
                      help="path within the repo holding the package (e.g. src)")
