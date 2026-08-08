@@ -62,7 +62,29 @@ nodrift check HEAD~1
 Exit code is `0` if nothing changed, `1` if something did — so it drops
 straight into CI.
 
+To compare two commits without checking either one out, pass both:
+
+```bash
+nodrift check HEAD~1 HEAD
+```
+
 If your package lives under `src/`, pass `--subdir src`.
+
+`--verbose` names everything the verdict does *not* cover: functions whose
+inputs were too large to record, and functions quarantined as
+nondeterministic.
+
+### Recording part of a package
+
+One noisy or vendored module can dominate a recording. Both options take
+`fnmatch` patterns against the full `module:Qualname` target and repeat:
+
+```bash
+nodrift record -p mypkg --exclude "mypkg.vendored.*"
+nodrift record -p mypkg --include "mypkg.core.*"
+```
+
+Whatever the patterns skip is printed, not hidden.
 
 ## How it works
 
