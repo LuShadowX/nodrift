@@ -93,7 +93,23 @@ class Recorder:
         # recording, so oversized inputs are counted and dropped.
         self.max_blob_bytes = max_blob_bytes
         self.abandon_after = 3
+        # An oversized blob is evidence about that one input; a pickling
+        # failure is usually evidence about the signature. But "usually" is
+        # not "always" — a function that takes a callback on some paths and
+        # plain data on others is still worth recording — so a failure gets
+        # considerably more rope than an oversized input before the target is
+        # written off. It costs almost nothing to be generous here: a
+        # signature that genuinely cannot be pickled fails thousands of times
+        # in a run, so it trips any threshold in this range immediately.
+        self.abandon_unpicklable_after = 16
         self._oversized_streak: dict[str, int] = defaultdict(int)
+        # Some functions take a callback — a lambda, a local function, a
+        # closure — on every single call. Those arguments can never be
+        # pickled, and the pickler only discovers that after walking the rest
+        # of the argument graph, so the full serialisation cost is paid and
+        # then thrown away. Failure is a property of the signature far more
+        # often than of one input, so it is worth remembering.
+        self._unpicklable_streak: dict[str, int] = defaultdict(int)
         self._abandoned: set[str] = set()
         # Adaptive sampling: how many consecutive duplicates before backing
         # off, and how far back-off is allowed to go.
@@ -275,11 +291,26 @@ class Recorder:
         except Exception:
             with self._lock:
                 self.stats["unpicklable"] += 1
+                # Same reasoning as oversized inputs: paying the serialisation
+                # cost only to discard the result is exactly what makes a
+                # library slow to record. A target whose arguments keep
+                # refusing to pickle is not going to start, so stop asking —
+                # and say out loud that it is not covered, rather than
+                # retrying it silently for the rest of the run.
+                self._unpicklable_streak[target] += 1
+                if (self._unpicklable_streak[target]
+                        >= self.abandon_unpicklable_after):
+                    self._abandoned.add(target)
+                    self.stats["abandoned_targets"] += 1
+                    self.stats["abandoned_unpicklable"] += 1
             return
         finally:
             _local.busy = False
 
         with self._lock:
+            # The pickle succeeded, so whatever made earlier calls fail was
+            # about those inputs and not about this function.
+            self._unpicklable_streak[target] = 0
             if len(blob) > self.max_blob_bytes:
                 self.stats["oversized"] += 1
                 # Paying the pickle cost only to discard the result is what

@@ -183,7 +183,7 @@ def pytest_unconfigure(config):
     if summary.get("abandoned"):
         print(
             f"[nodrift] {len(summary['abandoned'])} functions not recorded "
-            f"(inputs too large to capture); they are NOT covered",
+            f"(inputs too large, or not picklable); they are NOT covered",
             file=sys.stderr,
         )
     _recorder = None

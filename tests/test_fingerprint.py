@@ -125,6 +125,54 @@ def test_sampling_resets_when_a_function_stays_productive():
     assert recorder.stats.get("sampled_out", 0) == 0
 
 
+def test_a_function_whose_arguments_never_pickle_is_given_up_on():
+    """Unpicklable arguments must not be re-attempted for the whole run.
+
+    A function taking a lambda on every call can never be recorded, but the
+    pickler only discovers that after walking the rest of the argument graph.
+    On `sqlparse` two such functions cost 5.2s of a 10s run — more than half
+    the recording time, spent entirely on serialisation that was thrown away.
+    """
+    from nodrift.recorder import Recorder
+
+    recorder = Recorder(["_none_"], max_per_target=600)
+    attempts = 0
+    for _ in range(5000):
+        before = recorder.stats["unpicklable"]
+        recorder._capture("m:cb", (lambda t: t, "payload"), {})
+        attempts += recorder.stats["unpicklable"] - before
+
+    assert "m:cb" in recorder._abandoned
+    assert attempts <= recorder.abandon_unpicklable_after, (
+        f"{attempts} wasted pickles; should stop at "
+        f"{recorder.abandon_unpicklable_after}"
+    )
+    # The gap has to be declared as a gap, not merely skipped quietly.
+    assert recorder.stats["abandoned_unpicklable"] == 1
+
+
+def test_a_function_that_only_sometimes_takes_a_callback_stays_recorded():
+    """Giving up must be about the signature, not one awkward input.
+
+    This is the coverage half of the trade: on `sqlparse`, abandoning after 3
+    consecutive failures lost 66 inputs from two filters that take a callback
+    on some paths and plain data on others. Nothing is gained by writing those
+    functions off, because a truly unpicklable one fails thousands of times.
+    """
+    from nodrift.recorder import Recorder
+
+    recorder = Recorder(["_none_"], max_per_target=600)
+    for i in range(300):
+        # A short burst of failures, then real inputs — never long enough in a
+        # row to look like a signature that cannot be pickled.
+        recorder._capture("m:mixed", (lambda t: t,), {})
+        recorder._capture("m:mixed", (lambda t: t,), {})
+        recorder._capture("m:mixed", (i,), {})
+
+    assert "m:mixed" not in recorder._abandoned
+    assert len(recorder.calls["m:mixed"]) > 100, "novel inputs were lost"
+
+
 def test_the_cap_holds_when_threads_record_at_once():
     """A threaded suite must not be able to record past max_per_target.
 
