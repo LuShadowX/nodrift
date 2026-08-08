@@ -10,9 +10,9 @@
 You changed 200 lines. Your tests pass. Did anything *actually* change?
 
 Tests check what someone remembered to check. `nodrift` compares everything
-observable: return values, exceptions raised, and whether arguments were
-mutated, and the files it writes — using the real inputs your test suite
-already produces.
+observable: return values, exceptions raised, whether arguments were mutated,
+and the files it writes — using the real inputs your test suite already
+produces.
 
 No model reviews the code. The verdict comes from execution.
 
@@ -27,8 +27,8 @@ $ nodrift check HEAD~1
 
     mypkg.dates:parse
         3 of 47 inputs differ
-        before: ["raise", ["exception", "ValueError", "invalid date"]]
-        after:  ["return", ["object", "datetime.date", ...]]
+        before: [["raise", ["exception", "builtins.ValueError", "invalid date", ...
+        after:  [["return", ["object", "datetime.date", ...
 ```
 
 That last block is the point. Not *"this looks risky"* — **here is the input,
@@ -77,14 +77,16 @@ nondeterministic.
 ### Recording part of a package
 
 One noisy or vendored module can dominate a recording. Both options take
-`fnmatch` patterns against the full `module:Qualname` target and repeat:
+`fnmatch` patterns against the full `module:Qualname` target and repeat. Note
+the `:` — `"mypkg.core.*"` matches `mypkg.core.dates:parse` but *not*
+`mypkg.core:parse`, so match the module name without a trailing dot:
 
 ```bash
-nodrift record -p mypkg --exclude "mypkg.vendored.*"
-nodrift record -p mypkg --include "mypkg.core.*"
+nodrift record -p mypkg --exclude "mypkg.vendored*"
+nodrift record -p mypkg --include "mypkg.core*"
 ```
 
-Whatever the patterns skip is printed, not hidden.
+How many callables the patterns skip is printed, not hidden.
 
 ## How it works
 
@@ -162,7 +164,8 @@ most of it touches one file and needs one test.
 Start with the [good first issues][gfi]. The broad areas that need help:
 
 - **Side-effect capture** — intercept `requests`, `sqlalchemy`
-- **Comparators** for types that need a policy, e.g. datetimes and UUIDs
+- **Comparators** for types that still need a policy — datetimes and UUIDs are
+  settled: quarantined, not normalised (issue #12)
 - **Performance** — recording currently costs ~8x
 - **Framework adapters** beyond pytest
 

@@ -55,16 +55,17 @@ def pytest_addoption(parser):
         action="store",
         default=None,
         metavar="PATTERNS",
-        help="Comma-separated fnmatch patterns; record only matching targets "
-             "(e.g. 'mypkg.core.*').",
+        help="Comma-separated fnmatch patterns matched against "
+             "'module:Qualname'; record only matching targets "
+             "(e.g. 'mypkg.core*').",
     )
     group.addoption(
         "--nodrift-exclude",
         action="store",
         default=None,
         metavar="PATTERNS",
-        help="Comma-separated fnmatch patterns to skip "
-             "(e.g. 'mypkg.vendored.*').",
+        help="Comma-separated fnmatch patterns matched against "
+             "'module:Qualname', to skip (e.g. 'mypkg.vendored*').",
     )
 
 
