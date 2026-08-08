@@ -262,6 +262,10 @@ class Recorder:
             return
         with self._lock:
             if target in self._abandoned:
+                # Counted, not just skipped: every call has to land in some
+                # bucket or the totals stop adding up, and abandonment is now
+                # the common reason a call is never looked at.
+                self.stats["skipped_abandoned"] += 1
                 return
             bucket = self.calls[target]
             if len(bucket) >= self.max_per_target:

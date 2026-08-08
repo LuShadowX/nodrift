@@ -229,6 +229,7 @@ def test_stats_add_up_when_threads_record_at_once():
         + recorder.stats["skipped_at_cap"]
         + recorder.stats["unpicklable"]
         + recorder.stats["oversized"]
+        + recorder.stats["skipped_abandoned"]
     )
     assert accounted == total, f"{total - accounted} calls unaccounted for"
     assert len(recorder.calls["m:i"]) == recorder.stats["captured"]
