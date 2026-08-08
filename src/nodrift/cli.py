@@ -56,6 +56,28 @@ def _git(*argv: str, cwd: str | None = None) -> str:
     ).stdout.strip()
 
 
+def _strip_bytecode(root: str) -> None:
+    """Delete compiled bytecode from a staged tree.
+
+    A repository with `__pycache__` committed — or a stray `.pyc` — hands the
+    replay bytecode compiled from *other* source. Python will run it in
+    preference to the file we just materialised, so `check` reports no
+    behaviour change while the two versions genuinely differ. Silent, and
+    worse than an error.
+    """
+    for dirpath, dirnames, filenames in os.walk(root):
+        if os.path.basename(dirpath) == "__pycache__":
+            shutil.rmtree(dirpath, ignore_errors=True)
+            dirnames[:] = []
+            continue
+        for name in filenames:
+            if name.endswith((".pyc", ".pyo")):
+                try:
+                    os.remove(os.path.join(dirpath, name))
+                except OSError:
+                    pass
+
+
 def _export(ref: str, dest: str) -> None:
     """Materialise `ref` into `dest` (which is emptied first)."""
     if os.path.exists(dest):
@@ -66,6 +88,7 @@ def _export(ref: str, dest: str) -> None:
         capture_output=True, check=True,
     ).stdout
     subprocess.run(["tar", "-x", "-C", dest], input=archive, check=True)
+    _strip_bytecode(dest)
 
 
 def _export_worktree(dest: str) -> None:
@@ -80,6 +103,7 @@ def _export_worktree(dest: str) -> None:
         target = os.path.join(dest, rel)
         os.makedirs(os.path.dirname(target), exist_ok=True)
         shutil.copy2(src, target)
+    _strip_bytecode(dest)
 
 
 def _replay(recording: str, source_root: str, out: str, sub: str) -> None:

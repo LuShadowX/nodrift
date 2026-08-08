@@ -521,3 +521,38 @@ def test_check_still_defaults_to_the_working_tree(tmp_path):
     changed = _nodrift(repo, "check", "HEAD")
     assert changed.returncode == 1, changed.stdout + changed.stderr
     assert "working tree" in changed.stderr
+
+
+def test_committed_bytecode_cannot_shadow_the_staged_source(tmp_path):
+    """Stale `.pyc` in a ref must not be executed in place of its source.
+
+    A repository with `__pycache__` committed hands the replay bytecode
+    compiled from other source. Python prefers it to the file just
+    materialised, so both versions behave identically and `check` reports no
+    change while the code genuinely differs — a confident wrong answer.
+    """
+    repo = _git_repo(tmp_path)
+    _nodrift(repo, "record", "--package", "shapes")
+
+    source = (repo / "shapes.py").read_text()
+    (repo / "shapes.py").write_text(
+        source.replace('return "positive"', 'return "POSITIVE"'))
+
+    # Recording imported the original module, so __pycache__ now holds
+    # bytecode for the *old* source. Committing it is what sets the trap.
+    cache = repo / "__pycache__"
+    assert cache.exists(), "expected recording to have left bytecode behind"
+    subprocess.run(["git", "add", "-A"], cwd=str(repo), check=True,
+                   capture_output=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t",
+         "commit", "-qm", "commit the bytecode too"],
+        cwd=str(repo), check=True, capture_output=True,
+    )
+
+    result = _nodrift(repo, "check", "HEAD~1", "HEAD")
+    assert result.returncode == 1, (
+        "stale bytecode hid a real behaviour change\n"
+        + result.stdout + result.stderr
+    )
+    assert "classify" in result.stdout
