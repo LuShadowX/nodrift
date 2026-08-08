@@ -191,6 +191,11 @@ def cmd_check(args: argparse.Namespace) -> int:
     return _print_report(report, args, abandoned)
 
 
+def _plural(count: int, word: str) -> str:
+    """"1 function", "2 functions" — the report is read by people."""
+    return f"{count} {word}" if count == 1 else f"{count} {word}s"
+
+
 def _print_not_covered(abandoned: list[str], verbose: bool) -> None:
     """Say which functions the verdict above does not speak for.
 
@@ -202,7 +207,7 @@ def _print_not_covered(abandoned: list[str], verbose: bool) -> None:
     """
     if not abandoned:
         return
-    print(f"  {len(abandoned)} function(s) not fully recorded "
+    print(f"  {_plural(len(abandoned), 'function')} not fully recorded "
           f"(inputs too large, or not picklable) — not covered by this check")
     if verbose:
         for name in abandoned:
@@ -224,8 +229,8 @@ def _print_report(report: dict, args: argparse.Namespace,
     quarantined = report.get("quarantined", 0)
 
     if quarantined:
-        print(f"  {quarantined} record(s) quarantined as nondeterministic "
-              f"(not compared)")
+        print(f"  {_plural(quarantined, 'record')} quarantined as "
+              f"nondeterministic (not compared)")
         # A bare count tells a user nothing about whether the function they
         # care about is among the ones that stopped being checked.
         targets = report.get("quarantined_targets") or []
@@ -241,12 +246,13 @@ def _print_report(report: dict, args: argparse.Namespace,
     _print_not_covered(abandoned, getattr(args, "verbose", False))
 
     if not differs:
-        print(f"\n  no behaviour change across {total} recorded inputs "
-              f"in {report['total_targets']} functions\n")
+        print(f"\n  no behaviour change across "
+              f"{_plural(total, 'recorded input')} in "
+              f"{_plural(report['total_targets'], 'function')}\n")
         return 0
 
     print(f"\n  {differs} of {total} recorded inputs behave differently "
-          f"({report['changed_targets']} functions)\n")
+          f"({_plural(report['changed_targets'], 'function')})\n")
     for target, counts in sorted(
         report["changed"].items(), key=lambda kv: -kv[1]["differs"]
     ):

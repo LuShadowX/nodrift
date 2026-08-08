@@ -129,7 +129,7 @@ otherwise, but the gap is real.
 mode, size and a hash of the bytes). Network calls and database queries are
 still invisible.
 
-**Recording is slow.** Expect roughly an 8x slowdown on the recorded run.
+**Recording is slow.** Expect roughly a 4x slowdown on the recorded run.
 Tests that assert on wall-clock time may fail while recording.
 
 ## Measured behaviour
@@ -166,7 +166,7 @@ Start with the [good first issues][gfi]. The broad areas that need help:
 - **Side-effect capture** — intercept `requests`, `sqlalchemy`
 - **Comparators** for types that still need a policy — datetimes and UUIDs are
   settled: quarantined, not normalised (issue #12)
-- **Performance** — recording currently costs ~8x
+- **Performance** — recording currently costs ~4x
 - **Framework adapters** beyond pytest
 
 The most valuable bug report of all is a **false positive**: if `nodrift check`
