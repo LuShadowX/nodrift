@@ -17,8 +17,6 @@ import threading
 import types
 from collections import defaultdict
 
-from .fingerprint import digest, fingerprint
-
 _local = threading.local()
 
 _GZIP_MAGIC = b"\x1f\x8b"
@@ -385,12 +383,6 @@ class Recorder:
             "skipped_by_pattern": len(self.skipped_targets),
         }
         return summary
-
-
-def _cheap_hash(blob: bytes) -> str:
-    import hashlib
-
-    return hashlib.blake2b(blob, digest_size=16).hexdigest()
 
 
 def merge_recordings(shards: list[str], out: str, cap: int | None = None) -> dict:
