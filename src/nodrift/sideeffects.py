@@ -22,13 +22,23 @@ import os
 import re
 import tempfile
 
+def _slash(text: str) -> str:
+    """Use one separator everywhere, so one set of patterns fits both OSes."""
+    return text.replace("\\", "/")
+
+
 # A per-run temporary directory, plus the one random segment inside it.
 # macOS puts temp files under /var/folders/<2 chars>/<hash>/T/, so matching a
 # fixed prefix is not enough — the varying part is deeper than it looks.
+# Windows hides it under the user's AppData, which `gettempdir()` covers on
+# the running machine; the explicit pattern also catches a recording made
+# elsewhere, and is case-insensitive because Windows paths are.
 _TEMP_ROOTS = [
     r"/private/var/folders(?:/[^/]+){1,2}/T",
     r"/var/folders(?:/[^/]+){1,2}/T",
-    re.escape(tempfile.gettempdir()),
+    re.escape(_slash(tempfile.gettempdir())),
+    r"(?i:[A-Z]:/Users/[^/]+/AppData/Local/Temp)",
+    r"(?i:[A-Z]:/Windows/Temp)",
     r"/private/tmp",
     r"/tmp",
 ]
@@ -90,10 +100,13 @@ def normalise(path: str, root: str | None = None) -> str:
     root = root or os.getcwd()
     try:
         if os.path.commonpath([os.path.abspath(text), root]) == root:
-            return os.path.relpath(os.path.abspath(text), root)
+            # Forward slashes on the way out too: a path recorded on one OS
+            # must not differ from the same path recorded on another purely
+            # by separator.
+            return _slash(os.path.relpath(os.path.abspath(text), root))
     except (ValueError, OSError):
         pass
-    return _TEMPISH.sub(r"\1/<tmp>", text)
+    return _TEMPISH.sub(r"\1/<tmp>", _slash(text))
 
 
 class WriteWatcher:
