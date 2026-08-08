@@ -14,6 +14,14 @@ def compare(path_a: str, path_b: str, path_a2: str | None = None) -> dict:
     Any record that disagrees with itself across those two runs is inherently
     nondeterministic (embedded ids, clocks, randomness) and is quarantined
     rather than reported, since no claim about it can be made either way.
+
+    Quarantining is the whole answer here, not a placeholder for one. Making
+    clock- and uuid-reading functions comparable by normalising them was
+    considered and rejected in issue #12; the reasoning, and the specific
+    genuine bugs each flavour of normalisation would hide, are recorded on
+    `replay._install_determinism_controls`. What a quarantined record costs
+    the user is visibility, so the report carries `quarantined_targets` and
+    `check` prints the names.
     """
     with open(path_a) as fh:
         a = json.load(fh)

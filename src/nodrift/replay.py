@@ -189,7 +189,41 @@ def run(recording_path: str, deterministic: bool) -> dict:
 
 
 def _install_determinism_controls() -> None:
-    """Neutralise the common sources of run-to-run variation."""
+    """Neutralise the common sources of run-to-run variation.
+
+    Deliberately absent: freezing the clock and seeding `uuid4`. Functions
+    that read `datetime.now()`, `time.time()` or `uuid4()` disagree with
+    themselves across the two baseline passes, so `compare` quarantines them
+    and `check` names them. That is a coverage hole, and a large one — on a
+    module where every function touches a clock or an id, 8 of 9 functions go
+    unchecked. Closing it by normalising here was considered and rejected
+    (issue #12). The measurements behind that:
+
+    * Freezing every clock reader to one constant hides a `now()` -> `utcnow()`
+      swap, hides elapsed-time logic being deleted (every duration becomes
+      zero), and — worst — turns TTL and cache-expiry branches into dead code,
+      so a version that removed the refresh path entirely compares equal to one
+      that kept it. Normalisation is not output scrubbing; it is an
+      intervention in the program under test, and it can silence exactly the
+      branch the user wanted compared.
+    * Seeding `uuid4` has no safe granularity. Seed once per process and the
+      records share one stream, so a candidate that changes how many ids one
+      function mints shifts every later record and reports byte-identical
+      functions as changed — a false positive, which this tool weighs as the
+      worse error. Reseed per record and that goes away, but a fresh `uuid4()`
+      regressing into a module-level constant then compares equal.
+    * Scrubbing datetimes/UUIDs out of the fingerprint instead is worse still:
+      it hides any change *computed from* a clock, e.g. `timedelta(seconds=n)`
+      becoming `timedelta(minutes=n)`.
+
+    Quarantine is incomplete but never wrong: it makes no claim, so it cannot
+    make a false one, and since #12 part 1 it says out loud which functions it
+    dropped. Every normalisation above trades that for a confident answer that
+    is sometimes wrong. The honest fix for an unchecked clock-reader is to
+    inject the clock, which is the user's call and not something to fake on
+    their behalf. If this is revisited, the bar is: name the genuine change
+    each new control would hide, and show a test that still catches it.
+    """
     import random
     import os
 
