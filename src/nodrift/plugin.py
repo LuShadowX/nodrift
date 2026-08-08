@@ -50,6 +50,26 @@ def pytest_addoption(parser):
         default=None,
         help="Max distinct inputs recorded per function (default 600).",
     )
+    group.addoption(
+        "--nodrift-include",
+        action="store",
+        default=None,
+        metavar="PATTERNS",
+        help="Comma-separated fnmatch patterns; record only matching targets "
+             "(e.g. 'mypkg.core.*').",
+    )
+    group.addoption(
+        "--nodrift-exclude",
+        action="store",
+        default=None,
+        metavar="PATTERNS",
+        help="Comma-separated fnmatch patterns to skip "
+             "(e.g. 'mypkg.vendored.*').",
+    )
+
+
+def _patterns(raw) -> list[str]:
+    return [p.strip() for p in str(raw or "").split(",") if p.strip()]
 
 
 def _setting(config, option, env, default):
@@ -84,13 +104,26 @@ def pytest_configure(config):
         _import_submodules(module)
 
     cap = _setting(config, "--nodrift-cap", "NODRIFT_CAP", 600)
-    _recorder = Recorder(packages, max_per_target=int(cap))
+    include = _patterns(_setting(config, "--nodrift-include",
+                                 "NODRIFT_INCLUDE", None))
+    exclude = _patterns(_setting(config, "--nodrift-exclude",
+                                 "NODRIFT_EXCLUDE", None))
+    _recorder = Recorder(packages, max_per_target=int(cap),
+                         include=include, exclude=exclude)
     _recorder.install()
     print(
         f"[nodrift] recording {_recorder.patched_count} callables in "
         f"{', '.join(packages)}",
         file=sys.stderr,
     )
+    if _recorder.skipped_targets:
+        # Said out loud: a pattern that matched more than intended is a
+        # coverage gap, and a silent one would read as "verified".
+        print(
+            f"[nodrift] {len(_recorder.skipped_targets)} callables skipped by "
+            f"--include/--exclude; they are NOT covered",
+            file=sys.stderr,
+        )
 
 
 def _import_submodules(package) -> None:

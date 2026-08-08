@@ -8,6 +8,7 @@ already flowing through.
 
 from __future__ import annotations
 
+import fnmatch
 import functools
 import gzip
 import pickle
@@ -77,8 +78,15 @@ class Recorder:
         packages: list[str],
         max_per_target: int = 600,
         max_blob_bytes: int = 32 * 1024,
+        include: list[str] | None = None,
+        exclude: list[str] | None = None,
     ):
         self.packages = tuple(packages)
+        # fnmatch patterns against the target name, e.g. "pkg.vendored.*".
+        # An empty include list means everything the packages own.
+        self.include = tuple(include or ())
+        self.exclude = tuple(exclude or ())
+        self.skipped_targets: set[str] = set()
         self.max_per_target = max_per_target
         # Recursive parsers hand whole syntax trees to every call. Pickling
         # those repeatedly is what turns a 4k-LOC library into a multi-GB
@@ -114,6 +122,23 @@ class Recorder:
         mod = getattr(obj, "__module__", None) or ""
         return any(mod == p or mod.startswith(p + ".") for p in self.packages)
 
+    def _selected(self, target: str) -> bool:
+        """Whether `target` survives the include/exclude patterns.
+
+        Matched against the full `module:Qualname` so a caller can name a
+        subpackage, a module, or one method. Excludes win, since the point of
+        naming one is to keep it out.
+        """
+        if self.include and not any(
+            fnmatch.fnmatch(target, pattern) for pattern in self.include
+        ):
+            self.skipped_targets.add(target)
+            return False
+        if any(fnmatch.fnmatch(target, pattern) for pattern in self.exclude):
+            self.skipped_targets.add(target)
+            return False
+        return True
+
     def install(self) -> None:
         for name in list(sys.modules):
             # Recording our own machinery means every capture re-enters the
@@ -130,7 +155,9 @@ class Recorder:
     def _patch_module(self, module: types.ModuleType) -> None:
         for attr, obj in list(vars(module).items()):
             if isinstance(obj, types.FunctionType) and self._owns(obj):
-                self._patch(module, attr, obj, f"{module.__name__}:{obj.__qualname__}")
+                target = f"{module.__name__}:{obj.__qualname__}"
+                if self._selected(target):
+                    self._patch(module, attr, obj, target)
             elif isinstance(obj, type) and self._owns(obj):
                 self._patch_class(module, obj)
 
@@ -141,6 +168,8 @@ class Recorder:
             if attr.startswith("__") and attr.endswith("__") and attr not in DUNDER_ALLOW:
                 continue
             target = f"{module.__name__}:{cls.__qualname__}.{attr}"
+            if not self._selected(target):
+                continue
             if isinstance(obj, types.FunctionType):
                 self._patch(cls, attr, obj, target)
             elif isinstance(obj, staticmethod) and isinstance(
@@ -313,6 +342,9 @@ class Recorder:
             # Named explicitly: these functions are simply not covered, and a
             # silent gap would read as "verified" when it is not.
             "abandoned": abandoned,
+            # Named so an --include/--exclude that was too broad shows up as
+            # a number rather than as a quietly smaller recording.
+            "skipped_by_pattern": len(self.skipped_targets),
         }
         return summary
 

@@ -556,3 +556,79 @@ def test_committed_bytecode_cannot_shadow_the_staged_source(tmp_path):
         + result.stdout + result.stderr
     )
     assert "classify" in result.stdout
+
+
+def test_record_can_exclude_targets_by_pattern(tmp_path):
+    """Recording is otherwise all-or-nothing per package.
+
+    One noisy or vendored module can dominate a recording, and there was no
+    way to leave it out short of not recording the package at all.
+    """
+    repo = _git_repo(tmp_path)
+
+    excluded = _nodrift(repo, "record", "--package", "shapes",
+                        "--exclude", "shapes:classify")
+    assert "NOT covered" in excluded.stderr, excluded.stderr
+
+    from nodrift.recorder import load_recording
+
+    recorded = load_recording(str(repo / ".nodrift" / "recording.pkl"))
+    targets = {r["target"] for r in recorded["records"]}
+    assert "shapes:classify" not in targets, targets
+    assert targets, "excluding one target should not empty the recording"
+
+
+def test_record_can_include_only_matching_targets(tmp_path):
+    repo = _git_repo(tmp_path)
+
+    _nodrift(repo, "record", "--package", "shapes",
+             "--include", "shapes:classify")
+
+    from nodrift.recorder import load_recording
+
+    recorded = load_recording(str(repo / ".nodrift" / "recording.pkl"))
+    assert {r["target"] for r in recorded["records"]} == {"shapes:classify"}
+
+
+def test_exclude_beats_include_when_both_match():
+    """Naming something to keep out should keep it out."""
+    from nodrift.recorder import Recorder
+
+    recorder = Recorder(["pkg"], include=["pkg.*"], exclude=["pkg.vendored.*"])
+    assert recorder._selected("pkg.core:f")
+    assert not recorder._selected("pkg.vendored.thing:f")
+    assert "pkg.vendored.thing:f" in recorder.skipped_targets
+
+
+def _repo_from_recorded_project(project, repo):
+    """Turn the recorded toy project into a git repo carrying its recording."""
+    import shutil
+
+    shutil.copytree(str(project), str(repo))
+    for argv in (["init", "-q", "."], ["add", "-A"],
+                 ["-c", "user.email=t@t", "-c", "user.name=t",
+                  "commit", "-qm", "initial"]):
+        subprocess.run(["git", *argv], cwd=str(repo), check=True,
+                       capture_output=True)
+    (repo / ".nodrift").mkdir(exist_ok=True)
+    shutil.copy(
+        str(project.parent / "recording.pkl"),
+        str(repo / ".nodrift" / "recording.pkl"),
+    )
+
+
+def test_quarantined_functions_are_named_not_just_counted(recorded, tmp_path):
+    """A bare count hides which functions stopped being checked.
+
+    "47 records quarantined" tells a user nothing about whether the function
+    they care about is among them. The toy package puts id(self) in a
+    __repr__, so Box is quarantined every run and its name must reach the
+    user.
+    """
+    project, recording, _ = recorded
+    repo = tmp_path / "qrepo"
+    _repo_from_recorded_project(project, repo)
+
+    quiet = _nodrift(repo, "check", "HEAD")
+    assert "quarantined" in quiet.stdout, quiet.stdout
+    assert "toy:Box" in quiet.stdout, quiet.stdout

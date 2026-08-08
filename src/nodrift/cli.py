@@ -31,7 +31,9 @@ def cmd_record(args: argparse.Namespace) -> int:
         [sys.executable, "-m", "pytest", *command,
          "--nodrift", ",".join(args.package),
          "--nodrift-out", os.path.abspath(out),
-         "--nodrift-cap", str(args.cap)],
+         "--nodrift-cap", str(args.cap),
+         *(["--nodrift-include", ",".join(args.include)] if args.include else []),
+         *(["--nodrift-exclude", ",".join(args.exclude)] if args.exclude else [])],
     )
     if not os.path.exists(out):
         print("nodrift: no recording produced — did any tests run?", file=sys.stderr)
@@ -221,6 +223,17 @@ def _print_report(report: dict, args: argparse.Namespace,
     if quarantined:
         print(f"  {quarantined} record(s) quarantined as nondeterministic "
               f"(not compared)")
+        # A bare count tells a user nothing about whether the function they
+        # care about is among the ones that stopped being checked.
+        targets = report.get("quarantined_targets") or []
+        if targets:
+            if getattr(args, "verbose", False):
+                for target in targets:
+                    print(f"      {target}")
+            else:
+                shown = ", ".join(targets[:3])
+                more = f", and {len(targets) - 3} more" if len(targets) > 3 else ""
+                print(f"      in {shown}{more} — --verbose to list them")
 
     _print_not_covered(abandoned, getattr(args, "verbose", False))
 
@@ -259,6 +272,14 @@ def main(argv: list[str] | None = None) -> int:
     rec.add_argument("--out", "-o", default=None)
     rec.add_argument("--cap", type=int, default=600,
                      help="max distinct inputs per function (default 600)")
+    rec.add_argument("--include", action="append", default=None,
+                     metavar="PATTERN",
+                     help="record only targets matching this fnmatch pattern, "
+                          "e.g. 'mypkg.core.*' (repeatable)")
+    rec.add_argument("--exclude", action="append", default=None,
+                     metavar="PATTERN",
+                     help="skip targets matching this fnmatch pattern, "
+                          "e.g. 'mypkg.vendored.*' (repeatable)")
     rec.add_argument("pytest_args", nargs="*",
                      help="extra arguments passed through to pytest")
     rec.set_defaults(func=cmd_record)
