@@ -40,11 +40,8 @@ here is the difference.**
 pip install nodrift
 ```
 
-Requires Python 3.9+. Unix only for now: the per-call timeout is portable as
-of 0.1.2, but per-run temporary directories are still scrubbed with POSIX
-paths, so on Windows identical code would compare unequal ([#17]).
-
-[#17]: https://github.com/LuShadowX/nodrift/issues/17
+Requires Python 3.9+. Tested in CI on Linux, macOS and Windows across Python
+3.9, 3.11 and 3.13.
 
 ## Use
 
@@ -142,10 +139,9 @@ most of it touches one file and needs one test.
 
 Start with the [good first issues][gfi]. The broad areas that need help:
 
-- **Side-effect capture** — intercept `requests`, `sqlalchemy`, `open()`
-- **Comparators** for types that need tolerance, e.g. numpy arrays
-- **Performance** — recording currently costs 15-20x
-- **Windows support** — replace the `SIGALRM` timeout
+- **Side-effect capture** — intercept `requests`, `sqlalchemy`
+- **Comparators** for types that need a policy, e.g. datetimes and UUIDs
+- **Performance** — recording currently costs ~8x
 - **Framework adapters** beyond pytest
 
 The most valuable bug report of all is a **false positive**: if `nodrift check`
