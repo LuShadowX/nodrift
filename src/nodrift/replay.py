@@ -152,6 +152,8 @@ def run(recording_path: str, deterministic: bool) -> dict:
     resolved: dict[str, object] = {}
 
     for index, record in enumerate(records):
+        if deterministic:
+            _reseed()
         target = record["target"]
         key = f"{target}#{index}"
 
@@ -186,6 +188,29 @@ def run(recording_path: str, deterministic: bool) -> dict:
         results[key] = [outcome, before == after, watcher.summary()]
 
     return results
+
+
+def _reseed() -> None:
+    """Reset the random streams before every record.
+
+    Seeding once per process couples the records together: if the candidate
+    changes how many values one function draws, every record after it reads
+    from a shifted stream and a function nobody touched reports a difference.
+    That is a false positive, which is the one error this tool cannot afford.
+
+    Reseeding per record does not hide anything in exchange — a function that
+    stopped using randomness still returns something other than the seeded
+    value, so the change is still caught.
+    """
+    import random
+
+    random.seed(0)
+    numpy = sys.modules.get("numpy")
+    if numpy is not None:
+        try:
+            numpy.random.seed(0)
+        except Exception:
+            pass
 
 
 def _install_determinism_controls() -> None:

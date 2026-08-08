@@ -632,3 +632,58 @@ def test_quarantined_functions_are_named_not_just_counted(recorded, tmp_path):
     quiet = _nodrift(repo, "check", "HEAD")
     assert "quarantined" in quiet.stdout, quiet.stdout
     assert "toy:Box" in quiet.stdout, quiet.stdout
+
+
+RANDOM_PKG = '''
+import random
+
+
+def upstream(n):
+    return [random.random() for _ in range(n)]
+
+
+def downstream(tag):
+    return f"{tag}-{random.random():.6f}"
+'''
+
+RANDOM_TESTS = '''
+import rnd
+
+
+def test_all():
+    assert rnd.upstream(2)
+    assert rnd.downstream("a")
+    assert rnd.downstream("b")
+'''
+
+
+def test_random_draws_do_not_leak_between_records(tmp_path):
+    """One function's randomness must not implicate the next function.
+
+    Seeding once per process couples every record to the ones before it: a
+    candidate that draws one extra value shifts the stream, and a function
+    nobody touched reports a difference. A false positive is the one error
+    this tool cannot afford.
+    """
+    repo = tmp_path / "rndrepo"
+    repo.mkdir()
+    _write(str(repo), "rnd.py", RANDOM_PKG)
+    _write(str(repo), "test_rnd.py", RANDOM_TESTS)
+    for argv in (["init", "-q", "."], ["add", "-A"],
+                 ["-c", "user.email=t@t", "-c", "user.name=t",
+                  "commit", "-qm", "initial"]):
+        subprocess.run(["git", *argv], cwd=str(repo), check=True,
+                       capture_output=True)
+
+    _nodrift(repo, "record", "--package", "rnd")
+
+    source = (repo / "rnd.py").read_text()
+    (repo / "rnd.py").write_text(source.replace("range(n)]", "range(n + 1)]"))
+
+    result = _nodrift(repo, "check", "HEAD")
+    assert result.returncode == 1, "the real change in upstream went unnoticed"
+    assert "rnd:upstream" in result.stdout, result.stdout
+    assert "rnd:downstream" not in result.stdout, (
+        "downstream was never touched but was reported as changed\n"
+        + result.stdout
+    )
