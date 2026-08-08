@@ -2,6 +2,7 @@
 
     nodrift record --package mypkg      run the test suite, capture real inputs
     nodrift check HEAD~1                replay them against then and now
+    nodrift check HEAD~1 HEAD           or against two refs, neither checked out
 """
 
 from __future__ import annotations
@@ -276,17 +277,20 @@ def main(argv: list[str] | None = None) -> int:
                      help="max distinct inputs per function (default 600)")
     rec.add_argument("--include", action="append", default=None,
                      metavar="PATTERN",
-                     help="record only targets matching this fnmatch pattern, "
-                          "e.g. 'mypkg.core.*' (repeatable)")
+                     help="record only targets matching this fnmatch pattern "
+                          "against 'module:Qualname', e.g. 'mypkg.core*' "
+                          "(repeatable)")
     rec.add_argument("--exclude", action="append", default=None,
                      metavar="PATTERN",
-                     help="skip targets matching this fnmatch pattern, "
-                          "e.g. 'mypkg.vendored.*' (repeatable)")
+                     help="skip targets matching this fnmatch pattern "
+                          "against 'module:Qualname', e.g. 'mypkg.vendored*' "
+                          "(repeatable)")
     rec.add_argument("pytest_args", nargs="*",
                      help="extra arguments passed through to pytest")
     rec.set_defaults(func=cmd_record)
 
-    chk = sub.add_parser("check", help="compare a git ref against the working tree")
+    chk = sub.add_parser(
+        "check", help="compare a git ref against the working tree, or two refs")
     chk.add_argument("ref", nargs="?", default="HEAD",
                      help="git ref to treat as the baseline (default HEAD)")
     chk.add_argument("against", nargs="?", default=None,
@@ -297,7 +301,8 @@ def main(argv: list[str] | None = None) -> int:
                      help="path within the repo holding the package (e.g. src)")
     chk.add_argument("--json", action="store_true", help="emit the full report")
     chk.add_argument("--verbose", "-v", action="store_true",
-                     help="name the functions that could not be recorded")
+                     help="name the functions that were quarantined or could "
+                          "not be recorded")
     chk.set_defaults(func=cmd_check)
 
     args = parser.parse_args(argv)
