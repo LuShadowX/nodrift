@@ -194,13 +194,15 @@ def _print_not_covered(abandoned: list[str], verbose: bool) -> None:
     """Say which functions the verdict above does not speak for.
 
     Without this, `check` reports "no behaviour change" while silently
-    omitting every function whose inputs were too large to record — on
-    `sqlparse` that was 40 of the most important ones.
+    omitting every function whose inputs could not be recorded — because they
+    were too large, or because they were never picklable in the first place
+    (a function taking a callback on every call, say). On `sqlparse` that is
+    42 of the most important ones.
     """
     if not abandoned:
         return
     print(f"  {len(abandoned)} function(s) not fully recorded "
-          f"(inputs too large to capture) — not covered by this check")
+          f"(inputs too large, or not picklable) — not covered by this check")
     if verbose:
         for name in abandoned:
             print(f"      {name}")
