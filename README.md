@@ -18,12 +18,12 @@ No model reviews the code. The verdict comes from execution.
 
 ```
 $ nodrift record --package mypkg
-[nodrift] recording 505 callables in mypkg
-[nodrift] 18402 distinct inputs across 408 functions -> .nodrift/recording.pkl
+[nodrift] recording 132 callables in mypkg
+[nodrift] 4318 distinct inputs across 97 functions -> .nodrift/recording.pkl
 
 $ nodrift check HEAD~1
 
-  3 of 18402 recorded inputs behave differently (1 function)
+  3 of 4318 recorded inputs behave differently (1 function)
 
     mypkg.dates:parse
         3 of 47 inputs differ
@@ -145,6 +145,11 @@ with an ordinary one.
 | **False positives on identical code** | **0** | **0** |
 | Injected mutations caught by `nodrift` | 50 / 61 | 52 / 57 |
 | Injected mutations caught by the test suite | 57 / 61 | 52 / 57 |
+
+Recorded-input counts move with the library version: re-running the
+`sqlparse` recording on a later commit gives 16,321 inputs across the same
+141 functions. The mutation figures are from a single measured run at the
+version above.
 
 Zero false alarms is the property the tool lives or dies by, and it holds on
 both.
